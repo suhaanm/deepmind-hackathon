@@ -1,3 +1,4 @@
+// Adapted from farzaa/clicky (MIT) — leanring-buddy/CompanionManager.swift (screenshot pixel -> screen point mapping, L648-682), CompanionScreenCaptureUtility.swift
 // Coordinate mapping for everything drawn on (or captured from) a display.
 // Annotations are normalised 0-1000 from the top-left of the target display (x right, y down).
 // The overlay window fills one display, so CSS px = norm / 1000 * window size. Global screen points are in

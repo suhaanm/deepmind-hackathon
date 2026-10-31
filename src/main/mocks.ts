@@ -92,6 +92,8 @@ export function mockGrounder(): Grounder {
         model: 'mock',
       }
     },
+    prefetch() {},
+    invalidate() {},
   }
 }
 
@@ -170,8 +172,13 @@ export function mockArchitect(): LessonArchitect {
 // ---- ScamAnalyst (owner: SERVICES) ----
 export function mockScam(): ScamAnalyst {
   return {
-    async analyze() {
-      await sleep(400)
+    async analyze(_req, opts) {
+      opts?.onProgress?.('Checking the link…')
+      opts?.onProgress?.('Checking the wording…')
+      opts?.onProgress?.('Checking who it says it is…')
+      await sleep(250)
+      opts?.onProgress?.('Putting it together…')
+      await sleep(150)
       return {
         verdict: 'likely_scam',
         confidence: 0.86,

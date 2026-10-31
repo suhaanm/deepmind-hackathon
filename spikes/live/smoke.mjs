@@ -230,8 +230,40 @@ async function modeB() {
   await sess.stop('stop')
 }
 
+// Quick resumption/handover check (no 2-minute wait).
+async function modeC() {
+  const s = makeSession({ log: (...a) => log('  [conn]', ...a) })
+  const sess = s.session
+  const rec = recordEvents(sess)
+  sess.on('transcript', (t) => t.final && log(`  [${t.role}]`, t.text.slice(0, 140)))
+  sess.on('error', (e) => log('  ERROR', JSON.stringify(e)))
+  sess.on('resumption', (r) => r.reconnected && log('  RESUMPTION', JSON.stringify({ resumed: r.resumed })))
+  sess.on('state', (st) => log('  state', st.phase, st.reconnecting ? '(reconnecting)' : ''))
+  await sess.start({ voiceName: 'Charon' })
+  const ask = async (name, text) => {
+    const from = Date.now()
+    const bytes = s.speaker.bytes
+    await s.mic.say(speech(name, text), { leadMs: 200 })
+    await waitFor(sess, 'state', (st) => st.phase === 'speaking', 20_000).catch(() => undefined)
+    await waitFor(sess, 'state', (st) => st.phase === 'live', 30_000).catch(() => undefined)
+    await sleep(400)
+    return { reply: lastAssistantText(rec, from), audio: s.speaker.bytes - bytes }
+  }
+  const r0 = await ask('b0', 'Hello. Please remember that my favourite colour is purple. Just say okay.')
+  check('C first turn', r0.audio > 5000)
+  await sleep(1500)
+  log('--- handover (GoAway-style)')
+  const h0 = Date.now()
+  await sess.conn.handover(6000)
+  log(`  handover returned after ${Date.now() - h0}ms; instances state=${sess.conn.state}`)
+  const r1 = await ask('b10', 'What is my favourite colour right now?')
+  check('C context survived handover', /purple/i.test(r1.reply) && sess.phase !== 'ended', JSON.stringify(r1.reply))
+  await sess.stop('stop')
+}
+
 try {
-  if (mode === 'a') await modeA()
+  if (mode === 'c') await modeC()
+  else if (mode === 'a') await modeA()
   else if (mode === 'b') await modeB()
   else throw new Error('mode must be a|b')
 } catch (err) {

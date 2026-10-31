@@ -88,6 +88,8 @@ export function registerIpc(deps: IpcDeps): void {
   listen(IPC.liveTranscript, ({ role, text, final }) => {
     ctx.state.addCaption(role, text, final)
     if (ctx.settings.get().captions) services.overlay.caption(role, text, final)
+    // TEACH: the runner reacts to worry, "show me again" and "let me try" (the mock runner has no such method).
+    if (role === 'user' && final) (services.runner as { noteUtterance?: (t: string) => void }).noteUtterance?.(text)
   })
   listen(IPC.liveStatus, ({ connected, phase }) => {
     if (!connected && phase !== 'error') return

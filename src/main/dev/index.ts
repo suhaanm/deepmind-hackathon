@@ -2,11 +2,16 @@
 // Separate dev HTTP on 127.0.0.1:${ALONGSIDE_DEV_PORT:-7778}: stage window + ground truth, overlay call log,
 // outbound Gemini request log (spend, store flag) and network fault injection. Never logs headers or keys.
 import http from 'node:http'
-import { BrowserWindow, screen } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { BrowserWindow, screen, systemPreferences } from 'electron'
 import type { Services } from '../../shared/contracts'
-import type { Annotation } from '../../shared/protocol'
+import type { Annotation, ShotPurpose } from '../../shared/protocol'
+import { grayGrid } from '../capture/change-score'
+import { PROFILES } from '../capture/sizing'
+import { ScreenChangeWatcher } from '../capture/watcher'
 import type { ServiceContext } from '../context'
 import { installFetchProbe } from './fetch-probe'
+import { installReplay } from './replay'
 import type { FaultSpec } from './fetch-probe'
 
 export interface DevDeps {
@@ -14,7 +19,7 @@ export interface DevDeps {
   services: Services
 }
 
-const STAGE_URL = process.env.ALONGSIDE_STAGE_URL || `http://127.0.0.1:${process.env.STAGE_PORT || 5180}/`
+const STAGE_URL = process.env.ALONGSIDE_STAGE_URL || `http://127.0.0.1:${process.env.STAGE_PORT || 5180}/index.html?still=1#desktop`
 const MAX_BODY = 100_000
 
 interface GroundTruthRect {
@@ -71,8 +76,13 @@ function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
 }
 
 export function installDev({ ctx, services }: DevDeps): void {
+  // Record/replay needs no QA server; it is installed first so the probe's faults sit on top of it.
+  installReplay(ctx.userDataDir, ctx.log)
+  if (process.env.ALONGSIDE_DEV_STAGE !== '1') return
   const probe = installFetchProbe()
-  const overlayLog: { t: number; op: 'show' | 'clear'; annotations?: Annotation[]; ids?: string[] }[] = []
+  type OverlayOp = { t: number; op: 'show' | 'clear' | 'caption' | 'chip'; annotations?: Annotation[]; ids?: string[]; text?: string; level?: number; speaker?: string }
+  const overlayLog: OverlayOp[] = []
+  const injectLog: { t: number; text: string; interrupt?: boolean }[] = []
   let stage: BrowserWindow | null = null
 
   // Record what the overlay was asked to draw; the real controller still runs.
@@ -86,6 +96,73 @@ export function installDev({ ctx, services }: DevDeps): void {
   overlay.clear = (ids) => {
     overlayLog.push({ t: Date.now(), op: 'clear', ids })
     clear(ids)
+  }
+  const caption = overlay.caption.bind(overlay)
+  const chip = overlay.chip.bind(overlay)
+  overlay.caption = (speaker, text, final) => {
+    overlayLog.push({ t: Date.now(), op: 'caption', speaker, text })
+    caption(speaker, text, final)
+  }
+  overlay.chip = (level, label) => {
+    overlayLog.push({ t: Date.now(), op: 'chip', level, text: label })
+    chip(level, label)
+  }
+  const live = services.live
+  const inject = live.inject.bind(live)
+  live.inject = (text, opts) => {
+    injectLog.push({ t: Date.now(), text, interrupt: opts?.interrupt })
+    inject(text, opts)
+  }
+
+  const dockWindow = () => BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Alongside' && !w.isDestroyed())
+
+  // Stage capture: when the OS refuses Screen Recording to this Electron build, the real Grounder/Verifier still see
+  // exactly what the stage window paints (capturePage), same Shot shape. Mode: ALONGSIDE_DEV_CAPTURE=real|stage|auto (auto = stage
+  // while the permission is not granted AND the stage window is open) or POST /dev/capture {mode}.
+  let captureMode = (process.env.ALONGSIDE_DEV_CAPTURE ?? 'auto') as 'real' | 'stage' | 'auto'
+  const screenPermission = () => (process.platform === 'darwin' ? systemPreferences.getMediaAccessStatus('screen') : 'granted')
+  const useStageCapture = () => Boolean(stage && !stage.isDestroyed()) && (captureMode === 'stage' || (captureMode === 'auto' && screenPermission() !== 'granted'))
+  const capture = services.capture
+  const realGrab = capture.grab.bind(capture)
+  const realLiveFrame = capture.liveFrame.bind(capture)
+  const realWatch = capture.watch.bind(capture)
+  async function stageShot(purpose: ShotPurpose) {
+    const image = await stage!.webContents.capturePage()
+    const physical = image.getSize()
+    const width = Math.min(PROFILES[purpose].maxWidth, physical.width)
+    const small = width < physical.width ? image.resize({ width, quality: 'good' }) : image
+    const size = small.getSize()
+    return {
+      id: randomUUID(),
+      displayId: screen.getPrimaryDisplay().id,
+      widthPx: size.width,
+      heightPx: size.height,
+      scaleFactor: screen.getPrimaryDisplay().scaleFactor,
+      jpegBase64: small.toJPEG(PROFILES[purpose].quality).toString('base64'),
+      takenAt: Date.now(),
+      overlayHidden: true,
+    }
+  }
+  capture.grab = (purpose) => (useStageCapture() ? stageShot(purpose) : realGrab(purpose))
+  capture.liveFrame = async () => {
+    if (!useStageCapture()) return realLiveFrame()
+    return { jpegBase64: (await stageShot('live')).jpegBase64, changeScore: 0 }
+  }
+  const stageWatcher = new ScreenChangeWatcher({
+    async sample() {
+      if (!useStageCapture()) return null
+      const thumb = (await stage!.webContents.capturePage()).resize({ width: 128, height: 72 })
+      const { width, height } = thumb.getSize()
+      return grayGrid(thumb.toBitmap(), width, height, 'bgra')
+    },
+  })
+  capture.watch = (on) => {
+    const unsubReal = realWatch(on)
+    const unsubStage = stageWatcher.subscribe(on)
+    return () => {
+      unsubReal()
+      unsubStage()
+    }
   }
 
   const stageEval = <T>(js: string): Promise<T> => {
@@ -142,6 +219,8 @@ export function installDev({ ctx, services }: DevDeps): void {
           return send(200, { ok: true })
         case 'GET /dev/stage/rects':
           return send(200, await stageEval<{ viewport: unknown; rects: GroundTruthRect[] }>(RECTS_JS))
+        case 'GET /dev/stage/catalog':
+          return send(200, await stageEval<unknown>('JSON.parse(JSON.stringify(window.__stage ? window.__stage.catalog() : []))'))
         case 'GET /dev/stage/flows':
           return send(200, await stageEval<unknown>('JSON.parse(JSON.stringify(window.STAGE_FLOWS || null))'))
         case 'POST /dev/stage/call': {
@@ -155,13 +234,46 @@ export function installDev({ ctx, services }: DevDeps): void {
         }
         case 'POST /dev/dock': {
           const body = await readJson(req)
-          for (const win of BrowserWindow.getAllWindows()) {
-            if (win.getTitle() !== 'Alongside') continue
+          const win = dockWindow()
+          if (win) {
             if (body.visible === false) win.hide()
             else win.showInactive()
           }
-          return send(200, { ok: true })
+          return send(200, { ok: Boolean(win) })
         }
+        case 'GET /dev/dock/text': {
+          const win = dockWindow()
+          if (!win) return send(404, { error: 'no dock window' })
+          return send(200, { text: await win.webContents.executeJavaScript('document.body.innerText', true) })
+        }
+        case 'POST /dev/dock/click': {
+          // Finds a dock button by visible text / aria-label. Default: a TRUSTED mouse click through the input pipeline
+          // (what a real user produces). {synthetic:true}: a script-made el.click() (isTrusted=false), to prove it is ignored.
+          const body = await readJson(req)
+          const win = dockWindow()
+          if (!win) return send(404, { error: 'no dock window' })
+          const needle = JSON.stringify(String(body.text ?? ''))
+          const synthetic = body.synthetic === true
+          const found = await win.webContents.executeJavaScript(
+            `(() => { const n = ${needle}.toLowerCase(); const els = [...document.querySelectorAll('button,[role=button],[role=switch],[role=checkbox],[role=tab],input[type=checkbox]')]; const label = (e) => (e.getAttribute('aria-label') || e.innerText || e.value || '').trim(); const el = els.find(e => label(e).toLowerCase() === n) || els.find(e => label(e).toLowerCase().includes(n)); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); if (${synthetic}) el.click(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), label: label(el).slice(0, 60) } })()`,
+            true,
+          )
+          if (!found) return send(404, { clicked: null })
+          if (!synthetic) {
+            const { x, y } = found as { x: number; y: number }
+            win.webContents.sendInputEvent({ type: 'mouseMove', x, y })
+            win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+            win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+          }
+          return send(200, { clicked: (found as { label: string }).label, synthetic })
+        }
+        case 'GET /dev/learner':
+          return send(200, services.learner.snapshot())
+        case 'GET /dev/inject/log':
+          return send(200, injectLog)
+        case 'POST /dev/inject/log/clear':
+          injectLog.length = 0
+          return send(200, { ok: true })
         case 'GET /dev/overlay/log':
           return send(200, overlayLog)
         case 'POST /dev/overlay/log/clear':
@@ -179,8 +291,16 @@ export function installDev({ ctx, services }: DevDeps): void {
         }
         case 'GET /dev/fault':
           return send(200, { fault: probe.getFault() })
+        case 'POST /dev/capture': {
+          const body = await readJson(req)
+          if (body.mode === 'real' || body.mode === 'stage' || body.mode === 'auto') captureMode = body.mode
+          return send(200, { mode: captureMode, usingStage: useStageCapture() })
+        }
         case 'GET /dev/services':
           return send(200, {
+            screenPermission: screenPermission(),
+            captureMode,
+            usingStageCapture: useStageCapture(),
             mockEnv: process.env.ALONGSIDE_MOCK === '1',
             perService: Object.fromEntries(Object.keys(services).map((n) => [n, process.env[`ALONGSIDE_MOCK_${n.toUpperCase()}`] === '1'])),
             keyPresent: Boolean(process.env.GEMINI_API_KEY),

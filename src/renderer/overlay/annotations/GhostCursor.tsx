@@ -1,5 +1,5 @@
-// Ghost cursor: a translucent pointer that flies a bezier arc to each point of `path` and holds there.
-// Port of Clicky's BlueCursorView flight (OverlayWindow.swift, MIT, farzaa/clicky) to SVG + requestAnimationFrame.
+// Adapted from farzaa/clicky (MIT) — leanring-buddy/OverlayWindow.swift (BlueCursorView bezier flight, scale pulse, tangent heading)
+// Ghost cursor: a translucent pointer that flies a bezier arc to each point of `path` and holds there (SVG + rAF).
 // VISUAL ONLY: the overlay window is click-through and nothing here dispatches input; `pressAtEnd` draws a ring
 // that looks like a click, it does not click.
 import { useEffect, useMemo, useRef, type ReactElement } from 'react'
@@ -33,8 +33,10 @@ export function GhostCursor({ path, style, viewport, pressAtEnd, exiting, freeze
 
   const scale = g.size / 17.5
   const tagText = g.tag
-  const tagW = Math.ceil(tagText.length * g.tagFontSize * 0.55 + g.tagFontSize * 1.4)
-  const tagH = Math.ceil(g.tagFontSize * 1.9)
+  // Big mode scales every token by 1.6; the promise tag stays readable but must not hide the target.
+  const tagFont = style.scale > 1 ? g.tagFontSize * 0.75 : g.tagFontSize
+  const tagW = Math.ceil(tagText.length * tagFont * 0.55 + tagFont * 1.4)
+  const tagH = Math.ceil(tagFont * 1.9)
 
   useEffect(() => {
     const apply = (elapsed: number): boolean => {
@@ -44,13 +46,16 @@ export function GhostCursor({ path, style, viewport, pressAtEnd, exiting, freeze
       const tagX = s.pos.x + g.size * 0.8 + tagW > viewport.width - 8 ? s.pos.x - g.size * 0.6 - tagW : s.pos.x + g.size * 0.8
       const tagY = Math.min(viewport.height - tagH - 8, s.pos.y + g.size * 0.9)
       tagRef.current?.setAttribute('transform', `translate(${tagX.toFixed(1)} ${tagY.toFixed(1)})`)
+      // Shown while travelling and briefly after landing, then it gets out of the way of the thing being pointed at.
+      const lastHoldStart = plan.totalMs - (plan.segments[plan.segments.length - 1]?.holdMs ?? 0)
+      tagRef.current?.setAttribute('opacity', String(Math.max(0, Math.min(1, 1 - (elapsed - lastHoldStart - 700) / 300))))
       for (let i = 0; i < trailRefs.current.length; i++) {
         const el = trailRefs.current[i]
         if (!el) continue
         const past = sampleFlight(plan, Math.max(0, elapsed - (i + 1) * 42), ease, 0)
         el.setAttribute('cx', past.pos.x.toFixed(1))
         el.setAttribute('cy', past.pos.y.toFixed(1))
-        el.setAttribute('opacity', flying ? (g.trail.opacity * (1 - i / (g.trail.count + 1))).toFixed(2) : '0')
+        el.setAttribute('opacity', flying ? (Math.min(0.85, g.trail.opacity * 1.6) * (1 - i / (g.trail.count + 1))).toFixed(2) : '0')
       }
       for (const ring of pressRefs.current) {
         if (!ring) continue
@@ -76,7 +81,7 @@ export function GhostCursor({ path, style, viewport, pressAtEnd, exiting, freeze
     }
     frame()
     return () => cancelAnimationFrame(raf)
-  }, [plan, ease, pressMs, scale, g.size, g.tagFontSize, g.trail.count, g.trail.opacity, g.press.radius, tagW, tagH, viewport.width, viewport.height, freezeAtMs])
+  }, [plan, ease, pressMs, scale, g.size, tagFont, g.trail.count, g.trail.opacity, g.press.radius, tagW, tagH, viewport.width, viewport.height, freezeAtMs])
 
   const tone = style.tones.guide
   const first = sampleFlight(plan, 0, ease, 0).pos
@@ -90,10 +95,10 @@ export function GhostCursor({ path, style, viewport, pressAtEnd, exiting, freeze
           }}
           cx={first.x}
           cy={first.y}
-          r={g.size * (0.2 - i * 0.025)}
+          r={g.size * (0.27 - i * 0.032)}
           fill={g.fill}
-          stroke={tone.casing}
-          strokeWidth={1.2}
+          stroke={tone.halo}
+          strokeWidth={2}
           opacity={0}
         />
       ))}
@@ -118,7 +123,7 @@ export function GhostCursor({ path, style, viewport, pressAtEnd, exiting, freeze
       </g>
       <g ref={tagRef} transform={`translate(${first.x + g.size * 0.8} ${first.y + g.size * 0.9})`}>
         <rect width={tagW} height={tagH} rx={tagH / 2} fill={tone.casing} fillOpacity={0.94} stroke={tone.halo} strokeOpacity={0.55} strokeWidth={1.5} />
-        <text x={tagW / 2} y={tagH / 2} textAnchor="middle" dominantBaseline="central" fill="#fff" fontFamily={style.bubble.fontFamily} fontSize={g.tagFontSize} fontWeight={600}>
+        <text x={tagW / 2} y={tagH / 2} textAnchor="middle" dominantBaseline="central" fill="#fff" fontFamily={style.bubble.fontFamily} fontSize={tagFont} fontWeight={600}>
           {tagText}
         </text>
       </g>

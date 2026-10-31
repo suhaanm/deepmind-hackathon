@@ -1,6 +1,7 @@
 // Opt-in (WAKE_LIVE_LONG=1, ~12 minutes): proves the spotter survives the 10-minute connection cap of
 // gemini-3.5-transcribe-live. "Hey Amelia" is played before, around and after the proactive rotation (9 min) and
-// after the point where an un-rotated connection would have been closed by the server.
+// after the point where an un-rotated connection would have been closed by the server. The mic clock is global to the
+// test: closing and reopening the mic (a wake does that) must not replay the schedule.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import dotenv from 'dotenv'
@@ -24,9 +25,10 @@ class ScheduledMic implements WakeAudioSource {
   constructor(
     private readonly pcm: Int16Array,
     private readonly playAtSec: number[],
+    private readonly t0: number,
   ) {}
   async start(onPcm: (p: Int16Array) => void): Promise<void> {
-    const t0 = Date.now()
+    const t0 = this.t0
     const frame = 1600
     const plays = this.playAtSec.map((s) => ({ s, played: 0 }))
     this.timer = setInterval(() => {
@@ -54,7 +56,9 @@ describe.skipIf(!enabled || !existsSync(clip))('spotter across the 10-minute con
   it('keeps waking on the name before, during and after the rotation', async () => {
     const t0 = Date.now()
     const sec = () => Math.round((Date.now() - t0) / 1000)
-    const plays = [30, 530, 575, 700] // seconds; rotation is due at ~540 s (+ up to 2 s quiet wait), cap would hit ~600 s
+    // A wake restarts the connection, so only one early wake: the connection opened right after it lives from ~33 s,
+    // rotates at ~573 s, and an un-rotated one would be closed by the server at ~633 s. The second wake lands at 690 s.
+    const plays = [30, 690]
     const wakes: number[] = []
     const tokens: number[] = []
     const states: string[] = []
@@ -65,7 +69,7 @@ describe.skipIf(!enabled || !existsSync(clip))('spotter across the 10-minute con
         tokens.push(sec())
         return mintWakeToken()
       },
-      createAudioSource: () => new ScheduledMic(wavPcm(clip), plays),
+      createAudioSource: () => new ScheduledMic(wavPcm(clip), plays, t0),
       onStatus: (s: WakeStatus) => states.push(`${sec()}s:${s.state}`),
       onWake: (e) => {
         wakes.push(sec())
@@ -81,6 +85,7 @@ describe.skipIf(!enabled || !existsSync(clip))('spotter across the 10-minute con
     spotter.dispose()
     console.log(`[wake-long] wakes at ${JSON.stringify(wakes)}s; token mints at ${JSON.stringify(tokens)}s; status trail ${states.join(' ')}`)
     expect(wakes).toHaveLength(plays.length)
-    expect(tokens.some((s) => s >= 530 && s <= 560)).toBe(true) // proactive rotation happened
+    expect(tokens.some((s) => s >= 560 && s <= 600)).toBe(true) // proactive rotation happened
+    expect(states.some((x) => x.includes('reconnecting') || x.includes('unavailable'))).toBe(false) // seamless, no drop
   }, 800_000)
 })

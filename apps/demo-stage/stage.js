@@ -170,18 +170,18 @@
         inner =
           '<div class="card">' +
             '<div class="ts-head"><div><h3 data-ground-id="settings.text_size.heading">Text size</h3><p class="muted">Make the words on the screen bigger or smaller.</p></div>' +
-            '<div class="ts-value" id="ts-value" data-ground-id="settings.text_size.value">100% · Default</div></div>' +
+            '<div class="ts-value" id="ts-value" data-ground-id="settings.text_size.value" data-kind="block">100% · Default</div></div>' +
             '<div class="ts-row">' +
               '<button type="button" class="ts-btn" data-act="set.smaller" data-ground-id="settings.text_smaller" aria-label="Make text smaller"><span class="ts-a small">A</span><span class="ts-l">Smaller</span></button>' +
               '<input type="range" id="ts-slider" min="0" max="4" step="1" value="0" aria-label="Text size" data-input="textsize" data-ground-id="settings.text_size_slider">' +
               '<button type="button" class="ts-btn" data-act="set.larger" data-ground-id="settings.text_larger" aria-label="Make text bigger" data-desc="Button with a big letter A and the word Larger, to the right of the slider inside the Text size card"><span class="ts-a big">A</span><span class="ts-l">Larger</span></button>' +
             '</div>' +
-            '<div class="preview" data-ground-id="settings.text_size.preview"><div class="p-label">Preview</div><p>Your appointment is on Tuesday at 10:20. Please arrive five minutes early.</p></div>' +
+            '<div class="preview" data-ground-id="settings.text_size.preview" data-kind="block"><div class="p-label">Preview</div><p>Your appointment is on Tuesday at 10:20. Please arrive five minutes early.</p></div>' +
           '</div>' +
           '<div class="card">' + DISPLAY_ROWS.map(function (r) { return rowHtml('settings.display.', r); }).join('') + '</div>';
       } else if (p.id === 'advanced') {
         inner =
-          '<div class="banner-warn" data-ground-id="settings.advanced.warning">' + icon('warning') + '<span>Careful: these settings are for experts. Changing them can stop things working.</span></div>' +
+          '<div class="banner-warn" data-ground-id="settings.advanced.warning" data-kind="block">' + icon('warning') + '<span>Careful: these settings are for experts. Changing them can stop things working.</span></div>' +
           '<div class="card">' + ADVANCED_ROWS.map(function (r) { return rowHtml('settings.advanced.', r); }).join('') +
           '<div class="row-actions"><button type="button" class="btn" data-act="set.clear" data-ground-id="settings.advanced.clear_cache">Clear cache</button>' +
           '<button type="button" class="btn danger" data-act="set.reset" data-ground-id="settings.advanced.reset_all">Reset all settings…</button></div></div>';
@@ -496,7 +496,7 @@
         '<span class="dot' + (x.online ? ' on' : '') + '" title="' + (x.online ? 'Online' : 'Offline') + '"></span></button>';
     }).join('') || '<p class="muted" style="padding:1rem">No contacts match.</p>');
     setHtml($('#vc-detail'), c ?
-      '<span class="avatar xl" style="--c:' + c.color + '" data-ground-id="video.detail.avatar">' + initials(c.name) + '</span>' +
+      '<span class="avatar xl" style="--c:' + c.color + '" data-ground-id="video.detail.avatar" data-kind="media">' + initials(c.name) + '</span>' +
       '<h2 data-ground-id="video.detail.name">' + esc(c.name) + '</h2>' +
       '<p class="d-sub" data-ground-id="video.detail.relation">' + esc(c.rel) + (c.online ? ' · Online now' : ' · Offline') + '</p>' +
       '<p class="d-note">' + esc(c.note) + '</p>' +
@@ -563,7 +563,7 @@
     $('#th-menu-btn').setAttribute('aria-expanded', String(m.menuOpen));
     var html = c.msgs.map(function (x, i) {
       var who = x.from === 'them' && x.who ? '<strong>' + esc(x.who) + ':</strong> ' : '';
-      return '<div class="bubble ' + x.from + '" data-ground-id="messages.msg.' + sel + '.' + i + '"><p>' + who + linkify(x.text, sel) + '</p><time>' + esc(x.time) + '</time></div>';
+      return '<div class="bubble ' + x.from + '" data-kind="block" data-ground-id="messages.msg.' + sel + '.' + i + '"><p>' + who + linkify(x.text, sel) + '</p><time>' + esc(x.time) + '</time></div>';
     }).join('');
     var sc = $('#th-scroll'); setHtml(sc, html);
     var key = sel + ':' + c.msgs.length;
@@ -581,12 +581,13 @@
     var pct = Math.round(SCALES[S.textStep] * 100);
     setText($('#ts-value'), pct + '% · ' + SCALE_NAMES[S.textStep]);
     var sl = $('#ts-slider'); if (sl.value !== String(S.textStep)) sl.value = String(S.textStep);
+    $$('input[type="range"]').forEach(function (r) { r.style.setProperty('--f', String((r.value - r.min) / (r.max - r.min))); });
     var br = $('#win-settings [data-input="brightness"]'); if (br && br.value !== String(S.brightness)) br.value = String(S.brightness);
   }
 
   function renderOverlays() {
     var t = S.toast;
-    setHtml($('#toasts'), t ? '<div class="toast" role="status" data-ground-id="desk.toast" data-desc="Notification banner in the top-right corner of the screen from the Messages app">' +
+    setHtml($('#toasts'), t ? '<div class="toast" role="status" data-ground-id="desk.toast" data-kind="block" data-desc="Notification banner in the top-right corner of the screen from the Messages app">' +
       '<span class="t-icon">' + icon('chat') + '</span><div class="t-body"><div class="t-app">Messages · now</div><div class="t-title" data-ground-id="desk.toast.title">' + esc(t.title) + '</div>' +
       '<div class="t-text" data-ground-id="desk.toast.text">' + esc(t.text) + '</div>' +
       '<div class="t-actions"><button type="button" class="btn primary" data-act="toast.open" data-ground-id="desk.toast.open">Open</button><button type="button" class="btn" data-act="toast.dismiss" data-ground-id="desk.toast.dismiss">Dismiss</button></div></div></div>' : '');
@@ -598,7 +599,7 @@
       '<hr><button type="button" role="menuitem" data-act="desk.decoy" data-label="Power" data-ground-id="desk.menu.power">' + icon('power') + 'Power options…</button></div>' : '');
 
     var m = S.modal;
-    setHtml($('#modal-root'), m ? '<div class="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-ground-id="modal"><h2 id="modal-title" data-ground-id="modal.title">' + esc(m.title) + '</h2><p data-ground-id="modal.body">' + esc(m.body) + '</p><div class="m-actions">' +
+    setHtml($('#modal-root'), m ? '<div class="scrim"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" data-ground-id="modal" data-kind="block"><h2 id="modal-title" data-ground-id="modal.title">' + esc(m.title) + '</h2><p data-ground-id="modal.body">' + esc(m.body) + '</p><div class="m-actions">' +
       m.buttons.map(function (b) { return '<button type="button" class="btn ' + (b.kind || '') + '" data-act="' + b.act + '" data-ground-id="' + b.id + '">' + esc(b.label) + '</button>'; }).join('') + '</div></div></div>' : '');
   }
 
@@ -621,13 +622,23 @@
     return { L: L, T: T, R: R, B: B };
   }
   function unoccluded(el, b) {
-    var pts = [[.5, .5], [.2, .5], [.8, .5], [.5, .2], [.5, .8], [.15, .15], [.85, .85]];
+    var pts = [[.5, .5], [.2, .5], [.8, .5], [.5, .2], [.5, .8], [.2, .2], [.8, .8]], hits = 0;
     for (var i = 0; i < pts.length; i++) {
-      var x = b.L + (b.R - b.L) * pts[i][0], y = b.T + (b.B - b.T) * pts[i][1];
-      var hit = document.elementFromPoint(x, y);
-      if (hit && (el === hit || el.contains(hit))) return true;
+      var hit = document.elementFromPoint(b.L + (b.R - b.L) * pts[i][0], b.T + (b.B - b.T) * pts[i][1]);
+      if (hit && (el === hit || el.contains(hit))) hits++;
     }
-    return false;
+    return hits >= 4;
+  }
+  function textBox(el, b) {
+    var rg = document.createRange(), L = Infinity, T = Infinity, R = -Infinity, B = -Infinity;
+    rg.selectNodeContents(el);
+    Array.prototype.forEach.call(rg.getClientRects(), function (r) {
+      if (r.width < 1 || r.height < 1) return;
+      L = Math.min(L, r.left); T = Math.min(T, r.top); R = Math.max(R, r.right); B = Math.max(B, r.bottom);
+    });
+    if (L === Infinity) return b;
+    L = Math.max(L, b.L); T = Math.max(T, b.T); R = Math.min(R, b.R); B = Math.min(B, b.B);
+    return R - L < 1 || B - T < 1 ? b : { L: L, T: T, R: R, B: B };
   }
   function toNorm(b, space) {
     var W = window.innerWidth, H = window.innerHeight, ox = 0, oy = 0, sw = W, sh = H, z = 1;
@@ -655,9 +666,10 @@
     opts = opts || {};
     var out = [];
     $$('[data-ground-id]').forEach(function (el) {
-      var id = el.dataset.groundId, b = clipBox(el);
+      var id = el.dataset.groundId, b = clipBox(el), kind = kindOf(el);
       var vis = !!b && (opts.includeOccluded || unoccluded(el, b));
-      out.push({ id: id, app: id.split('.')[0], kind: kindOf(el), label: labelOf(el), desc: el.dataset.desc || null, visible: vis, box: vis ? toNorm(b, opts.space) : null });
+      if (vis && kind === 'text') b = textBox(el, b);
+      out.push({ id: id, app: id.split('.')[0], kind: kind, label: labelOf(el), desc: el.dataset.desc || null, visible: vis, box: vis ? toNorm(b, opts.space) : null });
       if (vis && el.type === 'range') {
         var rr = el.getBoundingClientRect(), th = parseFloat(getComputedStyle(document.documentElement).fontSize) * 1.75;
         var frac = (el.value - el.min) / (el.max - el.min), cx = rr.left + th / 2 + (rr.width - th) * frac, cy = rr.top + rr.height / 2;

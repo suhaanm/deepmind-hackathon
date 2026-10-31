@@ -4,7 +4,7 @@
 import type { NormBox } from '../../shared/protocol'
 import type { AnnotationStyle } from '../design/annotation-style'
 import { planArrow, type ArrowPlan } from './arrow'
-import { atLeast, clampPoint, inflate, normBoxToRect, normToPx, overlapArea, pointRect, rectRight, type Pt, type Rect, type Size } from './geometry'
+import { atLeast, clampPoint, inflate, normBoxToRect, normToPx, overlapArea, pointRect, rectRight, targetRect, unionRect, type Pt, type Rect, type Size } from './geometry'
 import { estimateTextBox, placeLabels, type LabelRequest, type PlacedLabel } from './layout'
 import type { ActiveAnnotation } from './store'
 
@@ -110,10 +110,13 @@ export function planScene(entries: ActiveAnnotation[], vp: Size, style: Annotati
   // Arrows after everything else so they can route around other marks (but never around their own target).
   for (const { annotation: a } of entries) {
     if (a.kind !== 'arrow') continue
-    const probe = planArrow({ to: a.to, from: a.from, vp, style: style.arrow, pointHalf })
-    const own = inflate(probe.target, style.arrow.gap * 2)
-    const avoid = obstacles.filter((r) => overlapArea(r, own) === 0)
-    const arrow = planArrow({ to: a.to, from: a.from, vp, style: style.arrow, pointHalf, avoid })
+    const target = targetRect(a.to, vp, pointHalf)
+    const own = inflate(target, style.arrow.gap)
+    // Marks around the same target (ring, step badge, tick) are part of it: stop short of all of them.
+    const around = obstacles.filter((r) => overlapArea(r, own) > 0)
+    const aim = around.length > 0 ? unionRect([target, ...around]) : target
+    const avoid = obstacles.filter((r) => !around.includes(r))
+    const arrow = planArrow({ to: a.to, from: a.from, vp, style: style.arrow, pointHalf, avoid, targetRect: aim })
     plan.arrows.set(a.id, arrow)
     note(a.id, {
       x: Math.min(arrow.start.x, arrow.tip.x),

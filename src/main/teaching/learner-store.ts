@@ -205,7 +205,8 @@ function parseSkills(section: RawSection | undefined, now: number): { skills: Mo
   return { skills, extraRows }
 }
 
-const CONF_RE = /^[-*]\s*(\d{4}-\d{2}-\d{2}(?:[ t]\d{2}:\d{2})?)\s*[·|,;]\s*([^·|,;]+?)\s*[·|,;]\s*([1-5])\s*(?:\/\s*5)?\b/i
+const DATE_WORD = '(\\d{4}-\\d{2}-\\d{2}(?:[ t]\\d{2}:\\d{2})?|today|yesterday)'
+const CONF_RE = new RegExp(`^[-*]\\s*${DATE_WORD}\\s*[\\u00b7|,;]\\s*([^\\u00b7|,;]+?)\\s*[\\u00b7|,;]\\s*([1-5])\\s*(?:\\/\\s*5)?\\b`, 'i')
 
 function parseConfidence(section: RawSection | undefined, now: number): ConfidencePoint[] {
   if (!section) return []
@@ -273,7 +274,7 @@ function parseAttempts(section: RawSection | undefined, now: number): AttemptRec
   return out
 }
 
-const LAST_RE = /^[-*]\s*(\d{4}-\d{2}-\d{2}(?:[ t]\d{2}:\d{2})?)\s*[·|]\s*([^·|]*?)\s*[·|]\s*(.+)$/
+const LAST_RE = new RegExp(`^[-*]\\s*${DATE_WORD}\\s*[\\u00b7|]\\s*([^\\u00b7|]*?)\\s*[\\u00b7|]\\s*(.+)$`, 'i')
 
 function parseLastSession(section: RawSection | undefined, now: number): Model['lastSession'] {
   if (!section) return undefined
@@ -458,6 +459,12 @@ export class TeachingLearnerStore implements LearnerStore {
     await this.serial(() => this.reloadFromDisk(true))
     this.loaded = true
     return this.snapshot()
+  }
+
+  // Pick up edits made to profile.md outside the app (a text editor, the demo seed) before the next session or lesson.
+  async refresh(): Promise<void> {
+    await this.serial(() => this.reloadFromDisk(!this.loaded))
+    this.loaded = true
   }
 
   async save(): Promise<void> {

@@ -16,6 +16,8 @@ vi.mock('electron', () => ({
 import { Bus } from '../../src/main/bus'
 import { registerHotkeys, START_ACCELERATORS, STOP_ACCELERATORS } from '../../src/main/hotkey'
 import { StateStore } from '../../src/main/state'
+import { registerSession } from '../../src/main/session'
+import { IPC } from '../../src/shared/ipc'
 import { DEFAULT_SETTINGS } from '../../src/shared/settings'
 
 const settingsStub = (persona: 'marcus' | 'amelia' | null) => ({ get: () => ({ ...DEFAULT_SETTINGS, persona }) }) as never
@@ -89,5 +91,27 @@ describe('global hotkeys', () => {
     const state = new StateStore(DEFAULT_SETTINGS)
     registerHotkeys(new Bus(), settingsStub(null), { state })
     expect(state.get().lastError).toMatch(/starting is taken/i)
+  })
+})
+
+describe('Stop hotkey against the real session controller', () => {
+  it('tells the dock to close Live and returns the state to its resting phase', () => {
+    const bus = new Bus()
+    const state = new StateStore(DEFAULT_SETTINGS)
+    const sendDock = vi.fn()
+    const settings = { get: () => ({ ...DEFAULT_SETTINGS }), patch: vi.fn(), onChange: vi.fn() }
+    const ctx = { bus, state, settings, sendDock, sendOverlay: vi.fn(), userDataDir: '', log: vi.fn() }
+    const services = { runner: { abort: vi.fn() }, overlay: { clear: vi.fn(), chip: vi.fn() } }
+    const session = registerSession(ctx as never, services as never, { cancel: vi.fn() } as never)
+    registerHotkeys(bus, settings as never, { state, stop: (r) => session.stop(r) })
+
+    handlers.get(START_ACCELERATORS[0])!() // Start: dock is told to open the session
+    expect(sendDock).toHaveBeenCalledWith(IPC.sessionStart, { personaId: 'marcus', source: 'hotkey' })
+    expect(state.get().phase).toBe('connecting')
+
+    handlers.get(STOP_ACCELERATORS[0])!() // Stop
+    expect(sendDock).toHaveBeenCalledWith(IPC.sessionStop, 'stop')
+    expect(state.get().phase).toBe('listening_for_name')
+    expect(services.runner.abort).toHaveBeenCalled()
   })
 })

@@ -133,12 +133,12 @@
     </nav>
 
     <aside class="widgets" aria-label="Desktop widgets">
-      <div class="widget" data-ground-id="desk.widget.weather">
+      <div class="widget" data-ground-id="desk.widget.weather" data-kind="block">
         <div class="w-title">Today</div>
         <div class="w-big">12&deg;C</div>
         <div class="w-sub">Cloudy, light wind</div>
       </div>
-      <div class="widget note" data-ground-id="desk.widget.note">
+      <div class="widget note" data-ground-id="desk.widget.note" data-kind="block">
         <div class="w-title">Sticky note</div>
         <p>Lily's birthday on Sunday. Ring Dave about Saturday lunch.</p>
       </div>
@@ -184,7 +184,7 @@
             <div class="precall">
               <h2 id="pre-heading" data-ground-id="video.precall.heading">Ready to join?</h2>
               <p class="muted" id="pre-sub" data-ground-id="video.precall.subtitle">Call with Lily</p>
-              <div class="preview-tile" data-ground-id="video.precall.preview">
+              <div class="preview-tile" data-ground-id="video.precall.preview" data-kind="media">
                 <svg class="art" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice"><use href="#art-self"/></svg>
                 <span class="tile-label" id="pre-cam-label">Camera is on</span>
               </div>
@@ -231,12 +231,12 @@
             <span class="call-timer" id="call-timer" data-ground-id="video.call.timer" data-desc="Call timer in white digits in the top-right corner of the call screen, counting up from 00:00">00:00</span>
           </div>
           <div class="call-stage">
-            <div class="tile-main" data-ground-id="video.call.main_video">
+            <div class="tile-main" data-ground-id="video.call.main_video" data-kind="media">
               <svg class="art" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice"><use href="#art-lily"/></svg>
               <div class="ringing" id="ringing"><svg class="ic"><use href="#i-phone"/></svg><span id="ringing-text">Calling Lily&hellip;</span></div>
               <span class="tile-label" id="main-label"><svg class="ic"><use href="#i-mic"/></svg>Lily</span>
             </div>
-            <div class="tile-self" data-ground-id="video.call.self_video">
+            <div class="tile-self" data-ground-id="video.call.self_video" data-kind="media">
               <svg class="art" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice"><use href="#art-self"/></svg>
               <span class="off" id="self-off" hidden>Camera off</span>
               <span class="tile-label">You</span>
@@ -276,7 +276,7 @@
           <div class="conv-list" id="conv-list" data-ground-id="messages.list" data-kind="container"></div>
         </aside>
         <section class="thread-pane" id="thread-pane">
-          <div class="empty" id="thread-empty" data-ground-id="messages.thread.empty"><svg class="ic big"><use href="#i-chat"/></svg><p>Select a conversation to read it.</p></div>
+          <div class="empty" id="thread-empty" data-ground-id="messages.thread.empty" data-kind="container"><svg class="ic big"><use href="#i-chat"/></svg><p>Select a conversation to read it.</p></div>
           <div class="thread" id="thread" hidden data-ground-id="messages.thread" data-kind="container">
             <header class="th-head">
               <span class="avatar" id="th-avatar" aria-hidden="true">AB</span>
@@ -291,7 +291,7 @@
                 <button type="button" role="menuitem" data-act="msg.delete" data-ground-id="messages.thread.delete"><svg class="ic"><use href="#i-trash"/></svg>Delete conversation</button>
               </div>
             </header>
-            <div class="th-banner" id="th-banner" role="status" hidden data-ground-id="messages.banner"></div>
+            <div class="th-banner" id="th-banner" role="status" hidden data-ground-id="messages.banner" data-kind="block"></div>
             <div class="th-scroll" id="th-scroll" data-kind="container"></div>
             <form class="compose" id="compose" autocomplete="off">
               <input id="compose-input" type="text" placeholder="Type a message" aria-label="Type a message" data-ground-id="messages.compose.input">

@@ -13,7 +13,7 @@ export function createAgentsFromServices(ctx: ServiceContext, s: Services): Agen
     bus: ctx.bus,
     capture: { grab: (purpose) => s.capture.grab(purpose) },
     grounder: { ground: (req) => s.grounder.ground(req) },
-    scam: { analyze: (req) => s.scam.analyze(req) },
+    scam: { analyze: (req, opts) => s.scam.analyze(req, opts) },
     overlay: { show: (annotations) => s.overlay.show(annotations), clear: (ids) => s.overlay.clear(ids) },
     live: { inject: (text, opts) => s.live.inject(text, opts) },
     learner: { snapshot: () => s.learner.snapshot() },

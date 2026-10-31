@@ -1,3 +1,4 @@
+// Adapted from farzaa/clicky (MIT) — leanring-buddy/OverlayWindow.swift (click-through, screen-saver level, all Spaces, over full-screen apps)
 // Everything about the overlay BrowserWindow that capture cares about, in one place.
 // Empirical result (docs/OVERLAY_NOTES.md): on macOS 26.2 + Electron 45, setContentProtection(true) excludes the
 // overlay from desktopCapturer, so grounding/verify shots are clean without hiding anything. It also hides the

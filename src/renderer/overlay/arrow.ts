@@ -1,6 +1,6 @@
-// Arrow geometry. Adapted in spirit from farzaa/clicky windows fork DrawingOverlayControl.cs BuildArrowHead
-// (head length/spread) but planned so the arrow never covers its target, stays on screen and avoids other marks.
-// Arrows are guidance only; they never become click targets (the overlay is click-through).
+// Adapted from farzaa/clicky (MIT) — windows/src/Clicky.Overlay/DrawingOverlayControl.cs (BuildArrowHead: head length and spread)
+// Planned so the arrow never covers its target, stays on screen and avoids other marks. Arrows are guidance only; they
+// never become click targets (the overlay is click-through).
 import type { NormBox, NormPoint } from '../../shared/protocol'
 import { clampPoint, distance, inflate, normToPx, rectCenter, targetRect, type Pt, type Rect, type Size } from './geometry'
 
@@ -60,11 +60,13 @@ export interface PlanArrowInput {
   pointHalf: number
   // Other marks the shaft should not cross (rings, labels, ...).
   avoid?: Rect[]
+  // Aim at this rect instead of `to` (the union of the target and any ring/badge drawn around it).
+  targetRect?: Rect
 }
 
 export function planArrow(input: PlanArrowInput): ArrowPlan {
   const { to, from, vp, style, pointHalf, avoid = [] } = input
-  const target = targetRect(to, vp, pointHalf)
+  const target = input.targetRect ?? targetRect(to, vp, pointHalf)
   const keepOut = inflate(target, style.gap)
   const center = rectCenter(target)
   const half = { w: keepOut.w / 2, h: keepOut.h / 2 }
@@ -79,6 +81,9 @@ export function planArrow(input: PlanArrowInput): ArrowPlan {
     // `from` inside (or hugging) the keep-out box: fall back to the automatic choice.
     const inside = start.x >= keepOut.x && start.x <= keepOut.x + keepOut.w && start.y >= keepOut.y && start.y <= keepOut.y + keepOut.h
     if (inside || distance(start, tip) < style.minLength * 0.6) return planArrow({ ...input, from: undefined })
+    // A start right next to the target would leave a stub that reads as a cursor: extend it back along the line.
+    const span = distance(start, tip)
+    if (dir && span < style.minLength) start = clampPoint({ x: tip.x - dir.x * style.minLength, y: tip.y - dir.y * style.minLength }, vp, margin)
   } else {
     const wanted = Math.max(style.minLength, style.headLength * 6)
     let best: { score: number; start: Pt; tip: Pt } | null = null

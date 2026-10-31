@@ -123,14 +123,14 @@ export interface TeachingDeps {
   learner: { snapshot(): LearnerSnapshot; preferredName?(): string | null }
   getLesson?(): PromptLesson | undefined
   // Resolves when persisted state has been loaded (first call only waits).
-  ready?: Promise<unknown>
+  ready?: Promise<unknown> | (() => Promise<unknown>)
   now?: () => number
 }
 
 export function createTeaching(deps: TeachingDeps): Teaching {
   return {
     async systemInstruction(personaId: PersonaId): Promise<string> {
-      if (deps.ready) await deps.ready
+      if (deps.ready) await (typeof deps.ready === 'function' ? deps.ready() : deps.ready)
       return buildSystemInstruction({
         persona: PERSONAS[personaId],
         settings: deps.getSettings(),

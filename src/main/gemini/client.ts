@@ -47,11 +47,21 @@ export class GeminiError extends Error {
   }
 }
 
-/** The one place the SDK client is built. The key is read from env (dotenv fallback) and never logged. */
+/**
+ * The one place the SDK client is built. The key is read from env (dotenv fallback) and never logged.
+ * Without a key this returns a client whose every call fails with a 401-style error, so the app still starts and
+ * each service degrades to its honest "could not check" answer instead of crashing.
+ */
 export function createAi(): AiLike {
   if (!process.env.GEMINI_API_KEY) loadEnv({ path: `${process.cwd()}/.env`, quiet: true })
   const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new GeminiError('api', 'GEMINI_API_KEY is not set (put it in .env)')
+  if (!apiKey) {
+    return {
+      interactions: {
+        create: () => Promise.reject(Object.assign(new Error('GEMINI_API_KEY is not set (put it in .env)'), { status: 401 })),
+      },
+    }
+  }
   const sdk = new GoogleGenAI({ apiKey })
   return {
     interactions: {
@@ -134,10 +144,18 @@ export async function callModel(deps: GeminiDeps, o: CallOptions): Promise<CallR
     if (remaining < 400) break
     const t0 = performance.now()
     try {
-      const interaction = await deps.ai.interactions.create(
-        { ...o.params, model: o.model, store: false },
-        { signal: AbortSignal.timeout(remaining) },
-      )
+      // The abort signal is best-effort inside the SDK; the race makes the deadline hard no matter what the transport does.
+      const controller = new AbortController()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const deadlineHit = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort()
+          reject(Object.assign(new Error('deadline'), { name: 'TimeoutError' }))
+        }, remaining)
+      })
+      const request = deps.ai.interactions.create({ ...o.params, model: o.model, store: false }, { signal: controller.signal })
+      request.catch(() => undefined) // a request that loses the race must not become an unhandled rejection
+      const interaction = await Promise.race([request, deadlineHit]).finally(() => clearTimeout(timer))
       const ms = Math.round(performance.now() - t0)
       recordLatency(o.name, ms)
       const u = interaction.usage ?? {}

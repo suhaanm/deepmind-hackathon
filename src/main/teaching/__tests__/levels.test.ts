@@ -7,6 +7,7 @@ import {
   applyOverride,
   beginStepCounters,
   clampLevel,
+  completeStep,
   createLevelEngine,
   decayState,
   detectAnxiety,
@@ -387,5 +388,74 @@ describe('fade over two attempts', () => {
       expect(d.state.level).toBe(expected)
       s = d.state
     }
+  })
+})
+
+describe('in-lesson adaptive fading', () => {
+  // Drive a sequence of steps through the reducer. Each step: [hints, errors, stalls].
+  type Step = [hints: number, errors: number, stalls: number]
+  function run(base: HelpLevel, steps: Step[], opts: { locked?: boolean; override?: 'show_again' | 'let_me_try' } = {}) {
+    let s = startAttemptLevel(base)
+    if (opts.override) s = applyOverride(s, opts.override)
+    const trace: { level: HelpLevel; change: string }[] = []
+    steps.forEach((step, i) => {
+      s = beginStepCounters(s)
+      for (let h = 0; h < step[0]; h++) s = recordSignal(s, 'hint').state
+      for (let e = 0; e < step[1]; e++) s = recordSignal(s, 'error').state
+      for (let t = 0; t < step[2]; t++) s = recordSignal(s, 'stall').state
+      const done = completeStep(s, { remainingSteps: steps.length - i - 1, locked: opts.locked })
+      s = done.state
+      trace.push({ level: s.current, change: done.change })
+    })
+    return trace
+  }
+  const CLEAN: Step = [0, 0, 0]
+
+  const cases: [string, HelpLevel, Step[], string[]][] = [
+    ['two clean steps ease off after step 2', 2, [CLEAN, CLEAN, CLEAN, CLEAN, CLEAN], ['2:none', '3:fade', '3:none', '3:none', '3:none']],
+    ['L1 start fades to L2', 1, [CLEAN, CLEAN, CLEAN], ['1:none', '2:fade', '2:none']],
+    ['never past base+1 within an attempt', 3, [CLEAN, CLEAN, CLEAN, CLEAN, CLEAN, CLEAN], ['3:none', '4:fade', '4:none', '4:none', '4:none', '4:none']],
+    ['a fade on the last step has nothing left to ease', 2, [CLEAN, CLEAN], ['2:none', '2:none']],
+    ['a hint breaks the clean run', 2, [CLEAN, [1, 0, 0], CLEAN, CLEAN, CLEAN], ['2:none', '2:none', '2:none', '3:fade', '3:none']],
+    ['an error breaks it too', 2, [CLEAN, [0, 1, 0], CLEAN], ['2:none', '2:none', '2:none']],
+    ['a stall breaks it too', 2, [[0, 0, 1], CLEAN, CLEAN, CLEAN], ['2:none', '2:none', '3:fade', '3:none']],
+    ['two struggling steps in a row bring help back after a fade', 2, [CLEAN, CLEAN, [1, 0, 0], [0, 1, 0], CLEAN], ['2:none', '3:fade', '3:none', '2:regress', '2:none']],
+    ['a clean step between struggles resets the run', 2, [CLEAN, CLEAN, [1, 0, 0], CLEAN, [0, 1, 0], CLEAN], ['2:none', '3:fade', '3:none', '3:none', '3:none', '3:none']],
+    ['regress never goes more than one below where the attempt started', 2, [[1, 0, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0], [1, 0, 0]], ['2:none', '1:regress', '1:none', '1:none', '1:none']],
+  ]
+  it.each(cases)('%s', (_name, base, steps, expected) => {
+    const trace = run(base, steps).map((t) => `${t.level}:${t.change}`)
+    expect(trace).toEqual(expected)
+  })
+
+  it('a locked level never fades or regresses', () => {
+    expect(run(2, [CLEAN, CLEAN, CLEAN, [1, 0, 0], [1, 0, 0]], { locked: true }).map((t) => t.change)).toEqual(['none', 'none', 'none', 'none', 'none'])
+  })
+
+  it('a level the learner chose is left alone', () => {
+    expect(run(2, [CLEAN, CLEAN, CLEAN], { override: 'show_again' }).map((t) => `${t.level}:${t.change}`)).toEqual(['1:none', '1:none', '1:none'])
+    expect(run(2, [CLEAN, CLEAN, CLEAN], { override: 'let_me_try' }).map((t) => `${t.level}:${t.change}`)).toEqual(['4:none', '4:none', '4:none'])
+  })
+
+  it('a step-down inside a step resets the clean run', () => {
+    let s = startAttemptLevel(3)
+    s = completeStep(beginStepCounters(s), { remainingSteps: 5 }).state
+    expect(s.cleanRun).toBe(1)
+    s = beginStepCounters(s)
+    s = recordSignal(recordSignal(s, 'hint').state, 'hint').state
+    expect(s.current).toBe(2)
+    expect(s.cleanRun).toBe(0)
+  })
+
+  it('does not cascade: a third hint on one step is not a new trigger', () => {
+    let s = startAttemptLevel(4)
+    for (let i = 0; i < 4; i++) s = recordSignal(s, 'hint').state
+    expect(s.current).toBe(3)
+  })
+
+  it('exposes the fade through the between-attempt rule unchanged', () => {
+    // An attempt that faded L2 -> L3 inside the lesson is still judged at the level it started at.
+    const d = evaluateAttempt(attempt({ levelAtStart: 2, hintsUsed: 1 }), state(2), { demoMode: true, now: NOW })
+    expect(d.state.level).toBe(3)
   })
 })

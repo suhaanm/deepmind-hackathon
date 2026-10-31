@@ -1,7 +1,7 @@
 // Electron main for the render harness. Run ONLY through scripts/electron-lock.sh (see run.sh).
 // Opens a hidden window per fixture, waits for window.__overlayReady, writes capturePage() PNGs.
 // Usage: electron electron-main.cjs --out <dir> [--fixtures a,b] [--backdrops light,dark] [--w 1440] [--h 900]
-const { app, BrowserWindow, nativeImage } = require('electron')
+const { app, BrowserWindow } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 
@@ -13,6 +13,7 @@ const H = Number(args.h ?? 900)
 const backdrops = (args.backdrops ?? 'light,dark').split(',')
 const page = path.join(repo, 'out/overlay-demo/demo.html')
 
+app.setPath('userData', fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'overlay-harness-')))
 app.disableHardwareAcceleration()
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
@@ -47,4 +48,3 @@ app.whenReady().then(async () => {
   console.error('[overlay-harness] failed', e)
   app.exit(1)
 })
-void nativeImage

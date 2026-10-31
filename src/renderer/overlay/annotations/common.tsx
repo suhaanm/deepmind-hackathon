@@ -2,7 +2,7 @@
 // (DESIGN's strokeLayers) so marks stay legible on light and dark backdrops; tone is also carried by dash + glyph.
 import { useLayoutEffect, useRef, type CSSProperties, type ReactElement, type ReactNode, type SVGProps } from 'react'
 import type { AnnotationTone } from '../../../shared/protocol'
-import { strokeLayers, type AnnotationStyle, type ToneGlyph } from '../../design/annotation-style'
+import { strokeLayers, type AnnotationStyle, type StrokeLayer, type ToneGlyph } from '../../design/annotation-style'
 import type { Size } from '../geometry'
 
 export type Lifecycle = 'enter' | 'exit'
@@ -45,10 +45,10 @@ export function stacked(
   style: AnnotationStyle,
   tone: AnnotationTone,
   draw: (props: StrokeProps, key: number) => ReactElement,
-  opts: { widthScale?: number; dashed?: boolean } = {},
+  opts: { widthScale?: number; dashed?: boolean; layers?: readonly StrokeLayer[] } = {},
 ): ReactElement[] {
   const dash = opts.dashed === false ? null : style.tones[tone].dash
-  return strokeLayers(style, tone, opts.widthScale ?? 1).map((l, i) =>
+  return (opts.layers ?? strokeLayers(style, tone, opts.widthScale ?? 1)).map((l, i) =>
     draw(
       {
         stroke: l.color,
@@ -64,13 +64,38 @@ export function stacked(
   )
 }
 
-export function Defs({ style, viewport }: { style: AnnotationStyle; viewport: Size }): ReactElement {
+// halo/casing/core for a thin line of exactly `coreWidth` px (underlines): the same recipe with slim fringes.
+export function slimLayers(style: AnnotationStyle, tone: AnnotationTone, coreWidth: number): StrokeLayer[] {
+  const t = style.tones[tone]
+  const fringe = Math.max(1.2, 1.2 * style.scale)
+  return [
+    { color: t.halo, width: coreWidth + fringe * 4, opacity: 0.92 },
+    { color: t.casing, width: coreWidth + fringe * 2, opacity: 1 },
+    { color: t.core, width: coreWidth, opacity: 1 },
+  ]
+}
+
+// Soft glow without SVG filters (a full-screen blur per mark would repaint every pulse frame): three wide,
+// translucent strokes of the tone colour approximate it. Decorative only; the stack underneath carries legibility.
+export function glowStack(style: AnnotationStyle, tone: AnnotationTone, draw: (props: StrokeProps, key: number) => ReactElement): ReactElement[] {
+  const core = style.tones[tone].core
+  const strength = style.glow.opacity / 0.55
+  return [
+    [1.0, 0.09],
+    [0.62, 0.15],
+    [0.3, 0.22],
+  ].map(([k, o], i) =>
+    draw(
+      { stroke: core, strokeWidth: style.stroke.halo + style.glow.blur * k, strokeOpacity: o * strength, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' },
+      i,
+    ),
+  )
+}
+
+export function Defs({ style }: { style: AnnotationStyle }): ReactElement {
   return (
     <defs>
-      <filter id="ov-glow" filterUnits="userSpaceOnUse" x={-60} y={-60} width={viewport.width + 120} height={viewport.height + 120}>
-        <feGaussianBlur stdDeviation={style.glow.blur / 2} />
-      </filter>
-      <filter id="ov-feather" filterUnits="userSpaceOnUse" x={-60} y={-60} width={viewport.width + 120} height={viewport.height + 120}>
+      <filter id="ov-feather" x="-25%" y="-40%" width="150%" height="180%">
         <feGaussianBlur stdDeviation={Math.max(0.01, style.spotlight.feather / 2)} />
       </filter>
     </defs>

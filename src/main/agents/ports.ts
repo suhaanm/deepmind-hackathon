@@ -2,7 +2,7 @@
 // There is deliberately no port for sending, buying, typing, clicking, submitting forms, or speaking.
 import type { Annotation, AgentChip, AgentKind, AgentPayload, AgentResult, GroundResult, LearnerSnapshot, ScamReport, Shot } from '../../shared/protocol'
 import type { Settings } from '../../shared/settings'
-import type { Capture, Grounder, LearnerStore, LiveBridge, OverlayController, ScamAnalyst } from '../../shared/contracts'
+import type { Capture, Grounder, LearnerStore, LiveBridge, OverlayController } from '../../shared/contracts'
 
 export interface GroundedAnswer {
   text: string
@@ -26,7 +26,8 @@ export interface AgentDeps {
   bus: { emit(event: 'agent:update', payload: { chip: AgentChip }): void }
   capture: Pick<Capture, 'grab'>
   grounder: Grounder
-  scam: ScamAnalyst
+  // `onProgress` is optional on the analyst: when it reports stages, the chip summary shows them live.
+  scam: { analyze(req: { text?: string; shot?: Shot; url?: string }, opts?: { onProgress?: (message: string) => void }): Promise<ScamReport> }
   overlay: Pick<OverlayController, 'show' | 'clear'>
   live: LiveBridge
   learner: Pick<LearnerStore, 'snapshot'>
@@ -41,6 +42,8 @@ export interface PortScope {
   agentId: string
   signal: AbortSignal
   now: () => number
+  // Replaces the running chip's summary (status stays 'running'); ignored once the agent is settled or stopped.
+  progress(message: string): void
   // Overlay highlights are tracked per agent so cancel/timeout/clear_annotations can remove them.
   highlights: {
     show(annotations: Annotation[], ttlMs: number): void
@@ -52,6 +55,7 @@ export interface ScamPorts {
   grabScreen(): Promise<Shot>
   extractMessage(shot: Shot): Promise<string>
   analyze(req: { text?: string; shot?: Shot; url?: string }): Promise<ScamReport>
+  progress(message: string): void
   ground(target: string, shot: Shot): Promise<GroundResult>
   showHighlights(annotations: Annotation[], ttlMs: number): void
   now(): number

@@ -8,7 +8,7 @@ function isMock(): boolean {
 }
 
 function client(): GoogleGenAI {
-  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1alpha' } })
+  return new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta' } })
 }
 
 function mockToken(model: string): LiveToken {
@@ -26,7 +26,7 @@ export async function mintLiveToken(): Promise<LiveToken> {
       uses: 1,
       expireTime,
       newSessionExpireTime: new Date(now + 60_000).toISOString(),
-      httpOptions: { apiVersion: 'v1alpha' },
+      httpOptions: { apiVersion: 'v1beta' },
     },
   })
   if (!token.name) throw new Error('Token service returned no token')
@@ -48,7 +48,7 @@ export async function mintWakeToken(): Promise<LiveToken> {
         model,
         config: { responseModalities: [Modality.TEXT], inputAudioTranscription: {} },
       },
-      httpOptions: { apiVersion: 'v1alpha' },
+      httpOptions: { apiVersion: 'v1beta' },
     },
   })
   if (!token.name) throw new Error('Token service returned no token')

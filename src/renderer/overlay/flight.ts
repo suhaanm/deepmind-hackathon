@@ -1,7 +1,6 @@
-// Adapted from farzaa/clicky (MIT): leanring-buddy/OverlayWindow.swift animateBezierFlightArc (quadratic bezier
-// arc, smoothstep ease, scale pulse sin(pi*t), rotation from the curve tangent) and the Windows fork's
-// FlyToSequence (visit several points in order). Constants come from DESIGN's ghostCursor.flight tokens.
-// Pure: no DOM, no clocks. The ghost cursor is visual only and never clicks.
+// Adapted from farzaa/clicky (MIT) — leanring-buddy/OverlayWindow.swift (animateBezierFlightArc), windows/src/Clicky.Overlay/OverlayWindowManager.cs (FlyToSequence)
+// Quadratic bezier arc, smoothstep ease, scale pulse sin(pi*t), heading from the curve tangent; several points are visited
+// in order. Constants come from DESIGN's ghostCursor.flight tokens. Pure: no DOM, no clocks. Visual only: never clicks.
 import { distance, type Pt } from './geometry'
 
 export interface FlightStyle {

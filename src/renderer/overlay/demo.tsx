@@ -2,6 +2,7 @@
 // Renders the real <OverlayScene> over a backdrop. harness/electron-main.cjs screenshots it with capturePage().
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
+import '../design/fonts'
 import { annotationStyle } from '../design/annotation-style'
 import { Backdrop } from './backdrop'
 import { FIXTURES } from './fixtures'
@@ -18,6 +19,12 @@ declare global {
 }
 window.__fixtures = Object.keys(FIXTURES)
 
+// Hidden windows do not advance CSS animations reliably, so stills skip entrances and freeze the pulse echo mid-way.
+const STILL_CSS = `
+.ov-enter,.ov-fade-enter,.ov-check{animation:none !important}
+.ov-pulse{animation-delay:-0.45s !important;animation-play-state:paused !important;animation-iteration-count:1 !important}
+`
+
 function Demo(): ReactElement {
   const q = new URLSearchParams(location.search)
   const name = q.get('fixture') ?? 'ring-badge'
@@ -31,6 +38,7 @@ function Demo(): ReactElement {
     dyslexiaFont: fixture.settings?.dyslexiaFont === true,
   }
   const reducedMotion = q.get('reduced') === '1'
+  const still = q.get('still') !== '0'
   const style = useMemo(() => annotationStyle(settings, { reducedMotion }), [settings.bigAnnotations, settings.highContrast, settings.dyslexiaFont, reducedMotion])
   const [state] = useState(() => fixture.commands.reduce((s, cmd) => reduceOverlay(s, cmd, { now: 0, viewport, style }), EMPTY_OVERLAY_STATE))
 
@@ -48,7 +56,7 @@ function Demo(): ReactElement {
   useEffect(() => {
     const t = setTimeout(() => {
       window.__overlayReady = true
-    }, 1400)
+    }, 1000)
     return () => clearTimeout(t)
   }, [])
 
@@ -63,6 +71,7 @@ function Demo(): ReactElement {
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       {bg}
+      {still ? <style>{STILL_CSS}</style> : null}
       <OverlayScene
         state={state}
         viewport={viewport}
@@ -70,6 +79,7 @@ function Demo(): ReactElement {
         captionsEnabled={fixture.settings?.captions !== false}
         speakerNames={{ user: 'You', assistant: 'Marcus' }}
         freezeGhostMs={freeze}
+        typeBubbles={!still}
       />
     </div>
   )

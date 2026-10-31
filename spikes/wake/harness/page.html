@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' blob:; worker-src 'self' blob:; connect-src 'self' wss://generativelanguage.googleapis.com https://generativelanguage.googleapis.com">
+<script src="wake.bundle.js"></script>
+<script>
+  const personas = [
+    { id: 'marcus', wakePhrases: ['hey marcus', 'hi marcus', 'ok marcus', 'okay marcus'], wakeAliases: ['hey marcos', 'hey markus'] },
+    { id: 'amelia', wakePhrases: ['hey amelia', 'hi amelia', 'ok amelia', 'okay amelia'], wakeAliases: ['hey emilia', 'hey amelie'] },
+  ]
+  const spotter = WakeLib.createWakeSpotter({
+    personas,
+    getToken: () => window.harness.getToken(),
+    onWake: (e) => console.log('WAKE ' + JSON.stringify(e)),
+    onStatus: (s) => console.log('STATUS ' + JSON.stringify(s)),
+    onDebug: (t, f) => console.log('DEBUG ' + (f ? 'F' : 'i') + ':' + t),
+  })
+  if (window.location.search.includes('probe')) {
+    const src = WakeLib.createMicAudioSource(); let n = 0, peak = 0
+    src.start((p) => { n++; for (const v of p) peak = Math.max(peak, Math.abs(v)) }).then(() => console.log('DEBUG probe mic started'), (e) => console.log('ERROR probe ' + e))
+    setInterval(() => { console.log('DEBUG probe frames=' + n + ' peak=' + peak); peak = 0 }, 1000)
+  }
+  spotter.start().then(() => console.log('STATUS start() resolved')).catch((e) => console.log('ERROR ' + e))
+</script>

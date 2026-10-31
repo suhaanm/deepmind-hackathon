@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import { floatToPcm16 } from './preroll'
 import type { WakeAudioSource } from './types'
 

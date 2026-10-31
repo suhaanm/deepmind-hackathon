@@ -1,5 +1,6 @@
-// HTML labels: ring label pill, highlightText note, and the speech bubble. HTML (not SVG text) so words wrap
-// properly at large sizes; position comes from layout.ts and the real size is reported back via <Measured>.
+// Adapted from farzaa/clicky (MIT) — leanring-buddy/OverlayWindow.swift (pointing bubble: scale-bounce entrance, character-by-character typing)
+// HTML labels: ring label pill, highlightText note, and the speech bubble. HTML (not SVG text) so words wrap properly at
+// large sizes; position comes from layout.ts and the real size is reported back via <Measured>.
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react'
 import type { AnnotationTone } from '../../../shared/protocol'
 import type { AnnotationStyle } from '../../design/annotation-style'
@@ -67,9 +68,9 @@ function useTyped(text: string, enabled: boolean): number {
   return Math.min(n, text.length)
 }
 
-export function BubbleView({ id, text, anchor, style, placed, exiting, onSize }: Common & { text: string; anchor: { x: number; y: number } }): ReactElement {
+export function BubbleView({ id, text, anchor, style, placed, exiting, onSize, typed: typeIn = true }: Common & { text: string; anchor: { x: number; y: number }; typed?: boolean }): ReactElement {
   const b = style.bubble
-  const typed = useTyped(text, !style.reducedMotion)
+  const typed = useTyped(text, typeIn && !style.reducedMotion)
   const rect = placed.rect
   const bw = b.borderWidth
   const side = placed.side

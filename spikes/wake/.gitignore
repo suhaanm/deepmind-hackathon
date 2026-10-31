@@ -1,3 +1,4 @@
 node_modules/
 audio/
 results/*.tmp
+harness/wake.bundle.js

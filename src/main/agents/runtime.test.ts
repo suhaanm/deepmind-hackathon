@@ -68,7 +68,7 @@ describe('AgentRuntime lifecycle', () => {
     expect(f.injected[0]!.text).toContain('status=error')
   })
 
-  it('scam checks get 45 s and lookups 30 s by default', async () => {
+  it('scam checks get 60 s and lookups 30 s by default', async () => {
     vi.useFakeTimers()
     const f = makeFakes()
     f.set.search = () => new Promise(() => undefined)
@@ -79,7 +79,9 @@ describe('AgentRuntime lifecycle', () => {
     await vi.advanceTimersByTimeAsync(31_000)
     expect(rt.list().find((c) => c.kind === 'lookup')?.status).toBe('error')
     expect(rt.list().find((c) => c.kind === 'scam_check')?.status).toBe('running')
-    await vi.advanceTimersByTimeAsync(15_000)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(rt.list().find((c) => c.kind === 'scam_check')?.status).toBe('running')
+    await vi.advanceTimersByTimeAsync(10_000)
     expect(rt.list().find((c) => c.kind === 'scam_check')?.status).toBe('error')
   })
 

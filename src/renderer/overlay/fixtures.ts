@@ -27,7 +27,7 @@ export const MOCK = {
   scamLine2: box(705, 405, 880, 433),
   scamLink: box(705, 470, 905, 498),
   sendButton: box(850, 780, 940, 840),
-  settingsIcon: box(930, 20, 975, 62),
+  settingsIcon: box(900, 20, 955, 70),
 } as const
 
 

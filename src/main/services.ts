@@ -8,6 +8,8 @@ import { createCapture } from './capture'
 import { createLiveBridge } from './live-bridge'
 import { createOverlayController } from './overlay-controller'
 import { createAgentsFromServices } from './agents/wire'
+import { teachingBundle } from './teaching'
+import { createGrounder, createLessonArchitect, createRouter, createScamAnalyst, createVerifier, geminiDeps, groundingPresetFromEnv } from './gemini'
 import {
   mockAgents,
   mockArchitect,
@@ -40,16 +42,16 @@ export function createServices(ctx: ServiceContext): Services {
   const s = {} as Services
   s.capture = pick('capture', () => mockCapture(), () => createCapture(ctx)) // OVERLAY
   s.overlay = pick('overlay', () => mockOverlay(ctx), () => createOverlayController(ctx)) // OVERLAY
-  s.grounder = pick('grounder', () => mockGrounder()) // SERVICES
-  s.verifier = pick('verifier', () => mockVerifier()) // SERVICES
-  s.architect = pick('architect', () => mockArchitect()) // SERVICES
-  s.scam = pick('scam', () => mockScam()) // SERVICES
-  s.router = pick('router', () => mockRouter()) // SERVICES
+  s.grounder = pick('grounder', () => mockGrounder(), () => createGrounder(geminiDeps(ctx, s), { preset: groundingPresetFromEnv() })) // SERVICES
+  s.verifier = pick('verifier', () => mockVerifier(), () => createVerifier(geminiDeps(ctx, s))) // SERVICES
+  s.architect = pick('architect', () => mockArchitect(), () => createLessonArchitect(geminiDeps(ctx, s))) // SERVICES
+  s.scam = pick('scam', () => mockScam(), () => createScamAnalyst(geminiDeps(ctx, s))) // SERVICES
+  s.router = pick('router', () => mockRouter(), () => createRouter(geminiDeps(ctx, s))) // SERVICES
   s.live = pick('live', () => mockLiveBridge(ctx), () => createLiveBridge(ctx)) // LIVE
-  s.learner = pick('learner', () => mockLearner()) // TEACH
-  s.levels = pick('levels', () => mockLevels()) // TEACH
-  s.runner = pick('runner', () => mockRunner(ctx, s)) // TEACH
-  s.teaching = pick('teaching', () => mockTeaching(ctx)) // TEACH
+  s.learner = pick('learner', () => mockLearner(), () => teachingBundle(ctx, s).learner) // TEACH
+  s.levels = pick('levels', () => mockLevels(), () => teachingBundle(ctx, s).levels) // TEACH
+  s.runner = pick('runner', () => mockRunner(ctx, s), () => teachingBundle(ctx, s).runner) // TEACH
+  s.teaching = pick('teaching', () => mockTeaching(ctx), () => teachingBundle(ctx, s).teaching) // TEACH
   s.agents = pick('agents', () => mockAgents(ctx, s), () => createAgentsFromServices(ctx, s)) // AGENTS
   return s
 }

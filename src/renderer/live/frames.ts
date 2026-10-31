@@ -1,3 +1,4 @@
+// Adapted from google-gemini/gemini-live-api-examples — gemini-live-ephemeral-tokens-websocket/frontend/mediaUtils.js (BaseVideoCapture 1 fps capture interval)
 // 1 fps screen-frame sender with change gating. The Live API accepts at most 1 frame per second and, with the default
 // turn coverage, every frame lands in context (about 70 tokens each), so an unchanged screen is sent at most every 5 s.
 export interface FrameSample {

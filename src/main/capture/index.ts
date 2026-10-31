@@ -1,3 +1,4 @@
+// Adapted from farzaa/clicky (MIT) — leanring-buddy/CompanionScreenCaptureUtility.swift (capture, JPEG sizing; own windows excluded from the shot)
 // Real Capture service: primary display via desktopCapturer, sizing per purpose, a cheap change score, and a
 // screen-change watcher. The overlay is excluded by content protection (see overlay-window.ts) or, in capturable
 // mode, hidden around ground/verify grabs.

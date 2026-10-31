@@ -1,5 +1,5 @@
-// Real-time voice+vision session with gemini-3.8-live.
-// Ported from google-gemini/gemini-live-api-examples (frontend/geminilive.js, script.js, mediaUtils.js) and extended with:
+// Adapted from google-gemini/gemini-live-api-examples — gemini-live-ephemeral-tokens-websocket/frontend/script.js, geminilive.js, mediaUtils.js
+// Real-time voice+vision session with gemini-3.8-live, extended with:
 // context-window compression + session resumption (transparent GoAway/drop recovery), instant playback flush on
 // `interrupted`, per-call async tool dispatch with cancellation (the example's receive loop awaits tools), gated injection,
 // idle/goodbye endings, change-gated 1 fps frames and phase detection. See THIRD_PARTY_NOTICES.md.
@@ -38,6 +38,7 @@ export interface LiveSessionOptions {
   // Matches a final user transcript that means "end the session" (checked after the model's farewell finishes).
   goodbye?: RegExp
   maxInjectWaitMs?: number
+  maxReconnectAttempts?: number
   WebSocketImpl?: typeof WebSocket
   log?: (...a: unknown[]) => void
 }
@@ -135,6 +136,9 @@ export class LiveSession {
         },
         onReconnected: ({ resumed }) => {
           this.reconnecting = false
+          // Speech captured during the gap goes first, so a sentence spanning the reconnect is not cut.
+          for (const c of this.pendingAudio) this.conn?.send(msg.audio(c))
+          this.pendingAudio = []
           this.emit('resumption', { handle: this.conn?.resumptionHandle ?? null, reconnected: true, resumed })
           this.emitState()
         },
@@ -144,6 +148,7 @@ export class LiveSession {
           void this.stop(info.expected ? 'stop' : 'error')
         },
         WebSocketImpl: this.opts.WebSocketImpl,
+        maxReconnectAttempts: this.opts.maxReconnectAttempts,
         log: this.log,
       })
       // Mic starts while the socket is opening; chunks are buffered so the learner's first words are not lost.
@@ -404,10 +409,8 @@ export class LiveSession {
       this.ttfaReported = false
     }
     if (!this.connected || this.reconnecting) {
-      if (!this.connected) {
-        this.pendingAudio.push(b64)
-        if (this.pendingAudio.length > MAX_PENDING_AUDIO) this.pendingAudio.shift()
-      }
+      this.pendingAudio.push(b64)
+      if (this.pendingAudio.length > MAX_PENDING_AUDIO) this.pendingAudio.shift()
       return
     }
     if (this.opts.duplex === 'half' && (this.generating || this.opts.audioOut.isPlaying())) return

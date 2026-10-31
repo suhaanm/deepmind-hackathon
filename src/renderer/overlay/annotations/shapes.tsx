@@ -1,12 +1,12 @@
-// SVG renderers for ring, arrow, badge, spotlight, tick and highlightText marks. Geometry is computed by the
-// scene (so labels can avoid the marks); these components only draw. Rendering approach for the Windows fork's
-// circle/arrow (DrawingOverlayControl.cs) is kept: glow + round caps + a head polygon sized from tokens.
+// Adapted from farzaa/clicky (MIT) — windows/src/Clicky.Overlay/DrawingOverlayControl.cs (circle and arrow drawing: glow, round caps, head polygon)
+// SVG renderers for ring, arrow, badge, spotlight, tick and highlightText marks. Geometry is computed by the scene (so
+// labels can avoid the marks); these components only draw.
 import type { ReactElement } from 'react'
 import type { AnnotationTone } from '../../../shared/protocol'
 import type { AnnotationStyle } from '../../design/annotation-style'
 import { arrowHeadPoints, arrowShaftPath, type ArrowPlan } from '../arrow'
 import type { Pt, Rect, Size } from '../geometry'
-import { Disc, Glyph, iterations, lifeClass, stacked } from './common'
+import { Disc, Glyph, glowStack, iterations, lifeClass, slimLayers, stacked } from './common'
 
 interface Base {
   style: AnnotationStyle
@@ -18,17 +18,9 @@ export function RingMark({ rect, tone, style, exiting }: Base & { rect: Rect; to
   const rx = Math.min(style.ring.radius, Math.min(rect.w, rect.h) / 2)
   return (
     <g className={`ov-mark ${lifeClass(exiting)}`}>
-      <rect
-        x={rect.x}
-        y={rect.y}
-        width={rect.w}
-        height={rect.h}
-        rx={rx}
-        fill="none"
-        stroke={t.glow}
-        strokeWidth={style.stroke.halo + style.glow.blur * 0.6}
-        filter="url(#ov-glow)"
-      />
+      {glowStack(style, tone, (p, k) => (
+        <rect key={`g${k}`} x={rect.x} y={rect.y} width={rect.w} height={rect.h} rx={rx} {...p} />
+      ))}
       {stacked(style, tone, (p, k) => (
         <rect key={k} x={rect.x} y={rect.y} width={rect.w} height={rect.h} rx={rx} {...p} />
       ))}
@@ -45,10 +37,12 @@ export function ArrowMark({ plan, tone, style, exiting }: Base & { plan: ArrowPl
   const head = arrowHeadPoints(plan)
   return (
     <g className={`ov-mark ${lifeClass(exiting)}`}>
-      <g stroke={t.glow} strokeWidth={style.stroke.halo + style.glow.blur * 0.6} fill="none" strokeLinecap="round" strokeLinejoin="round" filter="url(#ov-glow)">
-        <path d={shaft} />
-        <polygon points={head} fill={t.glow} />
-      </g>
+      {glowStack(style, tone, (p, k) => (
+        <g key={`g${k}`}>
+          <path d={shaft} {...p} />
+          <polygon points={head} {...p} />
+        </g>
+      ))}
       {stacked(style, tone, (p, k) => (
         <g key={k}>
           <path d={shaft} {...p} />
@@ -122,6 +116,7 @@ export function TickMark({ box, center, ok, tone, style, exiting }: Base & { box
           strokeLinecap="round"
           strokeLinejoin="round"
           pathLength={1}
+          className="ov-check"
           style={draw > 0 ? { strokeDasharray: 1, animation: `ov-draw ${draw}ms ease-out 120ms both` } : undefined}
         />
       ) : (
@@ -134,18 +129,18 @@ export function TickMark({ box, center, ok, tone, style, exiting }: Base & { box
 export function HighlightMarks({ rects, tone, style, exiting }: Base & { rects: Rect[]; tone: AnnotationTone }): ReactElement {
   const h = style.highlightText
   const t = style.tones[tone]
-  const widthScale = h.underlineWidth / style.stroke.core
+  const layers = slimLayers(style, tone, h.underlineWidth * 0.7)
   return (
     <g className={lifeClass(exiting) === 'ov-exit' ? 'ov-exit' : 'ov-fade-enter'}>
       {rects.map((r, i) => {
         const box = { x: r.x - h.pad, y: r.y - h.pad, w: r.w + h.pad * 2, h: r.h + h.pad * 2 }
-        const y = box.y + box.h + h.underlineWidth * 0.1
+        const y = box.y + box.h + 1
         return (
           <g key={i}>
             <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={h.radius} fill={t.wash} />
             {stacked(style, tone, (p, k) => (
-              <line key={k} x1={box.x + 1} y1={y} x2={box.x + box.w - 1} y2={y} {...p} />
-            ), { widthScale })}
+              <line key={k} x1={box.x + 2} y1={y} x2={box.x + box.w - 2} y2={y} {...p} />
+            ), { layers })}
           </g>
         )
       })}

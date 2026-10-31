@@ -78,9 +78,9 @@ export const lookupAgent = defineAgent<LookupPorts>({
       summary,
       result: { kind: 'lookup', text: steps.map((s, i) => `${i + 1}. ${s}`).join('\n'), ...(sources.length > 0 ? { sources } : {}) },
       tell:
-        `${summary} Read the steps out slowly, one or two at a time, and offer to point at the screen. ` +
-        (unverified ? 'Say clearly that these are unverified. ' : `Mention the source: ${sources[0]}. `) +
-        'Do not add any button names that are not in these steps.',
+        `${summary} Say only the first two steps now, in two short sentences, then ask if they want the rest. ` +
+        (unverified ? 'Say that these steps are unconfirmed. ' : `Mention the source: ${sources[0]}. `) +
+        'Do not add button names that are not in these steps.',
     }
   },
 })

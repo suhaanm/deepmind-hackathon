@@ -77,33 +77,47 @@ function cuPrompt(target: string): string {
   return `DRY RUN for an accessibility overlay: nothing will actually be clicked. Look at the screenshot and decide where you would click to select: "${target}".\nIf that exact element is not visible on this screen, do not call any tool and reply with exactly NOT_FOUND.\n${INJECTION_GUARD}`
 }
 
-export interface GrounderWithPrefetch extends Grounder {
-  // Start grounding in the background (30 s cache) so a later ground({target}) without a shot is instant or joins the call.
-  prefetch(req: { target: string; shot?: Shot }): void
-  // The screen changed: drop cached/prefetched results.
-  invalidate(): void
-}
+export type GrounderWithPreset = Grounder & Required<Pick<Grounder, 'prefetch' | 'invalidate'>> & { readonly preset: GroundPreset }
 
 interface Interim {
   current: GroundResult | null
 }
 
-export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): GrounderWithPrefetch {
+/** Reads ALONGSIDE_GROUNDING_PRESET=fast|accurate (anything else -> fast). */
+export function groundingPresetFromEnv(env: Record<string, string | undefined> = process.env): GroundPreset {
+  return env.ALONGSIDE_GROUNDING_PRESET === 'accurate' ? 'accurate' : 'fast'
+}
+
+/** Short ring label: the model's own words when sensible, else the target phrase trimmed of filler. */
+export function shortLabel(label: string | undefined, target: string): string {
+  const clean = (s: string) => s.replace(/\s+/g, ' ').trim()
+  const words = (s: string, max: number) => clean(s).split(' ').slice(0, max).join(' ')
+  const own = label ? clean(label) : ''
+  if (own && own.length <= 40) return own
+  if (own) return words(own, 5)
+  return words(clean(target).replace(/^(the|a|an)\s+/i, ''), 5) || 'Here'
+}
+
+export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): GrounderWithPreset {
   const preset: GroundPreset = config.preset ?? 'fast'
-  const primaryModel = preset === 'fast' ? deps.models.lite : deps.models.flash
-  const escalateModel = preset === 'fast' ? deps.models.flash : null
   const resolution = config.resolution ?? 'high'
   const timeoutMs = config.timeoutMs ?? 6000
   const ttl = config.cacheTtlMs ?? 30_000
   const linger = config.lingerMs ?? 25_000
   const escalateBelow = config.escalateBelow ?? 0.7
 
-  const cache = new Map<string, { at: number; result: GroundResult }>() // key: shotHash|target
+  type Mode = 'fast' | 'precise'
+  // precise (safety-critical steps, scam highlighting) and the 'accurate' preset both go flash-first, no lite.
+  const modeFor = (precise?: boolean): Mode => (precise || preset === 'accurate' ? 'precise' : 'fast')
+
+  const cache = new Map<string, { at: number; result: GroundResult }>() // key: shotHash|target|mode
   const inflight = new Map<string, { promise: Promise<GroundResult>; interim: Interim }>()
-  // Latest prefetch per target: lets ground({target}) with no shot reuse it (the runner prefetches on screen change).
+  // Latest prefetch per target+mode: lets ground({target}) with no shot reuse it (the runner prefetches on screen change).
   const prefetched = new Map<string, { key: string; at: number }>()
 
-  const notFound = (reason: string, started: number, model = primaryModel): GroundResult => ({
+  deps.log('grounder', `preset=${preset} (set ALONGSIDE_GROUNDING_PRESET=fast|accurate) fast=${deps.models.lite}->${deps.models.flash} precise=${deps.models.flash}`)
+
+  const notFound = (reason: string, started: number, model: string = deps.models.lite): GroundResult => ({
     found: false,
     confidence: 0,
     reason,
@@ -132,7 +146,16 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
     if (!box) throw new GeminiError('parse', 'found=true but box_2d is missing or malformed')
     const problem = boxProblem(box)
     if (problem) throw new GeminiError('parse', problem === 'oversize' ? 'box covers more than half the screen' : 'box is degenerate')
-    return { found: true, box, point: boxCenter(box), confidence, label: parsed.label || undefined, reason: parsed.reason || undefined, latencyMs: Date.now() - started, model }
+    return {
+      found: true,
+      box,
+      point: boxCenter(box),
+      confidence,
+      label: shortLabel(parsed.label, target),
+      reason: parsed.reason || undefined,
+      latencyMs: Date.now() - started,
+      model,
+    }
   }
 
   async function cuFallback(shot: Shot, target: string, budgetMs: number, started: number): Promise<GroundResult | null> {
@@ -158,7 +181,7 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
         point,
         box: boxAroundPoint(point),
         confidence: 0.5, // a click point only; the box is a nominal square around it
-        label: typeof click.args.intent === 'string' ? click.args.intent : undefined,
+        label: shortLabel(undefined, target),
         reason: 'approximate location (fallback)',
         latencyMs: Date.now() - started,
         model: `${deps.models.flash}+computer_use`,
@@ -168,13 +191,15 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
     }
   }
 
-  async function cascade(shot: Shot, target: string, hint: string | undefined, started: number, interim: Interim): Promise<GroundResult> {
+  async function cascade(shot: Shot, target: string, hint: string | undefined, started: number, interim: Interim, mode: Mode): Promise<GroundResult> {
+    const primaryModel = mode === 'fast' ? deps.models.lite : deps.models.flash
+    const escalateModel = mode === 'fast' ? deps.models.flash : null
     let first: GroundResult | null = null
     let firstError: unknown = null
     try {
       first = await boxCall(primaryModel, shot, target, hint, started)
     } catch (e) {
-      if (e instanceof GeminiError && e.code === 'timeout') return notFound('timeout', started)
+      if (e instanceof GeminiError && e.code === 'timeout') return notFound('timeout', started, primaryModel)
       firstError = e
     }
     if (first && first.found && first.confidence >= escalateBelow) return first
@@ -194,18 +219,23 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
     deps.log('grounder', `box call failed (${firstError instanceof Error ? firstError.message : String(firstError)}); trying computer_use fallback`)
     const remaining = Math.max(0, timeoutMs - (Date.now() - started))
     const fb = await cuFallback(shot, target, remaining, started)
-    return fb ?? notFound('I could not pin down where that is on the screen.', started)
+    return fb ?? notFound('I could not pin down where that is on the screen.', started, primaryModel)
   }
 
-  function start(shot: Shot, target: string, hint: string | undefined) {
-    const key = `${hashShot(shot)}|${normaliseTarget(target)}`
-    const hit = cache.get(key)
-    if (hit && Date.now() - hit.at < ttl) return { key, promise: Promise.resolve({ ...hit.result, latencyMs: 0 }), interim: { current: null } as Interim }
+  const keyFor = (shot: Shot, target: string, mode: Mode) => `${hashShot(shot)}|${normaliseTarget(target)}|${mode}`
+
+  function start(shot: Shot, target: string, hint: string | undefined, mode: Mode) {
+    const key = keyFor(shot, target, mode)
+    // A precise (flash-first) answer is at least as good as a fast one, so it can serve a fast request.
+    for (const k of mode === 'fast' ? [key, keyFor(shot, target, 'precise')] : [key]) {
+      const hit = cache.get(k)
+      if (hit && Date.now() - hit.at < ttl) return { key: k, promise: Promise.resolve({ ...hit.result, latencyMs: 0 }), interim: { current: null } as Interim }
+    }
     const existing = inflight.get(key)
     if (existing) return { key, ...existing }
     const started = Date.now()
     const interim: Interim = { current: null }
-    const promise = cascade(shot, target, hint, started, interim)
+    const promise = cascade(shot, target, hint, started, interim, mode)
       .then((r) => {
         // Cache decisive answers only; a timeout or "could not pin down" must be retried fresh.
         if (r.found || r.confidence > 0) cache.set(key, { at: Date.now(), result: r })
@@ -225,36 +255,47 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
     ])
 
   const shotFor = async (shot?: Shot): Promise<Shot | null> => shot ?? (deps.capture ? deps.capture.grab('ground') : null)
+  const prefKey = (norm: string, mode: Mode) => `${norm}|${mode}`
 
   return {
-    async ground({ target, shot, hint }) {
+    preset,
+
+    async ground({ target, shot, hint, precise }) {
       const started = Date.now()
       const norm = normaliseTarget(target)
-      if (!norm) return notFound('Nothing to look for.', started)
+      const mode = modeFor(precise)
+      const finish = (r: GroundResult): GroundResult => {
+        deps.log('grounder', `ground "${target.slice(0, 60)}" mode=${mode} found=${r.found} conf=${r.confidence.toFixed(2)} model=${r.model} ${r.latencyMs}ms${r.reason && !r.found ? ` reason="${r.reason.slice(0, 60)}"` : ''}`)
+        return r
+      }
+      if (!norm) return finish(notFound('Nothing to look for.', started))
       if (!shot) {
-        const pre = prefetched.get(norm)
-        if (pre && Date.now() - pre.at < ttl) {
+        // Reuse a prefetch for this target (cached result or in-flight call) before paying for a fresh capture.
+        for (const m of mode === 'fast' ? (['fast', 'precise'] as const) : (['precise'] as const)) {
+          const pre = prefetched.get(prefKey(norm, m))
+          if (!pre || Date.now() - pre.at >= ttl) continue
           const hit = cache.get(pre.key)
-          if (hit && Date.now() - hit.at < ttl) return { ...hit.result, latencyMs: Date.now() - started }
+          if (hit && Date.now() - hit.at < ttl) return finish({ ...hit.result, latencyMs: Date.now() - started })
           const flying = inflight.get(pre.key)
-          if (flying) return withDeadline(flying.promise, flying.interim, started)
+          if (flying) return finish(await withDeadline(flying.promise, flying.interim, started))
         }
       }
       const s = await shotFor(shot)
-      if (!s) return notFound('No screenshot available.', started)
-      const { promise, interim } = start(s, target, hint)
-      return withDeadline(promise, interim, started)
+      if (!s) return finish(notFound('No screenshot available.', started))
+      const { promise, interim } = start(s, target, hint, mode)
+      return finish(await withDeadline(promise, interim, started))
     },
 
-    prefetch({ target, shot }) {
+    prefetch({ target, shot, precise }) {
       const norm = normaliseTarget(target)
       if (!norm) return
+      const mode = modeFor(precise)
       void (async () => {
         try {
           const s = await shotFor(shot)
           if (!s) return
-          const { key } = start(s, target, undefined)
-          prefetched.set(norm, { key, at: Date.now() })
+          const { key } = start(s, target, undefined, mode)
+          prefetched.set(prefKey(norm, mode), { key, at: Date.now() })
         } catch (e) {
           deps.log('grounder', `prefetch skipped: ${e instanceof Error ? e.message : String(e)}`)
         }

@@ -73,9 +73,10 @@ export const LIVE_TOOLS: FunctionDeclaration[] = [
     name: 'spawn_agent',
     behavior: NB,
     description:
-      'Starts a background helper and returns straight away; its result arrives later as an [AGENT_RESULT] message that you then explain in plain words. ' +
-      'Use scam_check when the learner asks whether a message, email, text or page is a scam or genuine (set payload.useScreen=true to read what is on screen). Use lookup for a factual question you cannot answer from the screen. Use lesson_summary only at the end of a lesson. ' +
-      'Tell the learner you are checking, then keep talking naturally.',
+      'Starts a background helper and returns straight away; its result arrives later as an [AGENT_RESULT ...] line that you then explain in plain words. ' +
+      'Use scam_check when the learner asks whether a message, email, text or page is a scam or genuine. Use lookup for a factual question you cannot answer from the screen. Use lesson_summary only at the end of a lesson. ' +
+      'Set payload.text ONLY if the user dictated or read out the message themselves. Otherwise omit it: the agent will read the message from the screen. ' +
+      'scam_check takes around 20-30 seconds, so tell the learner you are checking and keep chatting naturally; do not wait in silence.',
     parameters: {
       type: 'object',
       properties: {
@@ -85,9 +86,9 @@ export const LIVE_TOOLS: FunctionDeclaration[] = [
           type: 'object',
           description: 'Optional extra material for the helper.',
           properties: {
-            text: { type: 'string', description: 'Message text to analyse, if the learner read it out.' },
+            text: { type: 'string', description: 'Set payload.text ONLY if the user dictated or read out the message themselves. Otherwise omit it: the agent will read the message from the screen.' },
             url: { type: 'string', description: 'A web address to check.' },
-            useScreen: { type: 'boolean', description: 'True to analyse what is currently on screen.' },
+            useScreen: { type: 'boolean', description: 'True to analyse what is currently on screen (the default when payload.text is omitted).' },
           },
         },
       },

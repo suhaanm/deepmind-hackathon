@@ -69,7 +69,7 @@ export function startController(opts: ControllerOptions = {}): () => void {
   // Sessions whose end must not be reported to main (replaced by a newer one, which main is already setting up).
   const silenced = new WeakSet<LiveSession>()
 
-  const log = (...a: unknown[]) => console.debug('[live]', ...a)
+  const log = (...a: unknown[]) => console.log('[live]', ...a)
 
   // ---------- state mirror ----------
   const applyState = (next: CompanionState): void => {

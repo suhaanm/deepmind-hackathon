@@ -33,15 +33,16 @@ export interface FetchProbe {
 
 const GOOGLE_HOST = /(^|\.)googleapis\.com$/
 
-function describeBody(body: unknown): { keys: string[]; store: boolean | null; hasImage: boolean; bytes: number } {
-  if (typeof body !== 'string') return { keys: [], store: null, hasImage: false, bytes: 0 }
+function describeBody(body: unknown): { keys: string[]; store: boolean | null; hasImage: boolean; bytes: number; model: string | null } {
+  if (typeof body !== 'string') return { keys: [], store: null, hasImage: false, bytes: 0, model: null }
   const bytes = Buffer.byteLength(body)
   try {
     const json = JSON.parse(body) as Record<string, unknown>
     const store = typeof json.store === 'boolean' ? json.store : null
-    return { keys: Object.keys(json), store, hasImage: /"mime_?[Tt]ype"\s*:\s*"image\//.test(body), bytes }
+    const model = typeof json.model === 'string' ? json.model.replace(/^models\//, '') : null
+    return { keys: Object.keys(json), store, hasImage: /"mime_?[Tt]ype"\s*:\s*"image\//.test(body), bytes, model }
   } catch {
-    return { keys: [], store: null, hasImage: false, bytes }
+    return { keys: [], store: null, hasImage: false, bytes, model: null }
   }
 }
 
@@ -63,7 +64,8 @@ export function installFetchProbe(): FetchProbe {
     const started = Date.now()
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
     const info = describeBody(init?.body)
-    const model = /models\/([^/:?]+)/.exec(url.pathname)?.[1] ?? null
+    // Generate-content puts the model in the path; the Interactions API puts it in the body.
+    const model = /models\/([^/:?]+)/.exec(url.pathname)?.[1] ?? info.model
     const entry: FetchLogEntry = {
       t: started,
       host: url.hostname,
@@ -80,7 +82,7 @@ export function installFetchProbe(): FetchProbe {
     log.push(entry)
     if (log.length > 2000) log.shift()
 
-    const active = fault && fault.mode !== 'off' && (fault.match === '*' || url.pathname.includes(fault.match)) ? fault : null
+    const active = fault && fault.mode !== 'off' && (fault.match === '*' || url.pathname.includes(fault.match) || (model ?? '').includes(fault.match)) ? fault : null
     if (active) {
       if (active.count !== undefined) {
         active.count -= 1
@@ -103,9 +105,14 @@ export function installFetchProbe(): FetchProbe {
         case 'http401':
           return json(401, { error: { code: 401, message: 'API key not valid. Please pass a valid API key.', status: 'UNAUTHENTICATED' } })
         case 'garbage':
-          return json(200, { candidates: [{ content: { parts: [{ text: '<<<not json at all>>> ```{ "found": tru' }] }, finishReason: 'STOP' }] })
+          return json(200, {
+            id: 'qa-fault',
+            status: 'completed',
+            steps: [{ type: 'model_output', content: [{ type: 'text', text: '<<<not json at all>>> ```{ "found": tru' }] }],
+            candidates: [{ content: { parts: [{ text: '<<<not json at all>>> ```{ "found": tru' }] }, finishReason: 'STOP' }],
+          })
         case 'empty':
-          return json(200, { candidates: [] })
+          return json(200, { id: 'qa-fault', status: 'completed', steps: [], candidates: [] })
         case 'network':
           done('fault')
           throw new TypeError('fetch failed')

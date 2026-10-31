@@ -131,12 +131,22 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
     if (status !== 'cancelled' && tell) inject(formatAgentResultLine(run.chip.kind, run.chip.id, status, tell))
   }
 
+  function progress(run: RunningAgent, message: string): void {
+    if (run.settled || run.controller.signal.aborted) return
+    const summary = inlineSafe(message, 120)
+    if (!summary || summary === run.chip.summary) return
+    run.chip = { ...run.chip, summary }
+    chips = chips.map((c) => (c.id === run.chip.id ? run.chip : c))
+    publish(run.chip)
+  }
+
   async function execute(agent: RegisteredAgent, run: RunningAgent, task: string, payload: AgentPayload): Promise<void> {
     const { signal } = run.controller
     const scope: PortScope = {
       agentId: run.chip.id,
       signal,
       now,
+      progress: (message) => progress(run, message),
       highlights: { show: (annotations, ttlMs) => showHighlights(run.chip.id, signal, annotations, ttlMs) },
     }
     const aborted = new Promise<never>((_, reject) => {

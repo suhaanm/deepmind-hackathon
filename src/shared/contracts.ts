@@ -33,8 +33,15 @@ export interface Capture {
 }
 
 export interface Grounder {
-  // One grounding call. Returns found:false when unsure; never fabricates a box.
-  ground(req: { target: string; shot?: Shot; hint?: string }): Promise<GroundResult>
+  // One grounding call. Returns found:false when unsure; never fabricates a box. Always sets `label` when found.
+  // `precise`: take the slower, more accurate path (flash first). Use it for safetyCritical steps and scam-phrase highlighting.
+  ground(req: { target: string; shot?: Shot; hint?: string; precise?: boolean }): Promise<GroundResult>
+  // Start grounding in the background (30 s cache) so a later ground({target}) WITHOUT a shot is instant or joins the call.
+  // Call it when the screen changes, while the Live model is still narrating. Optional so thin wrappers need not forward it;
+  // the real grounder and the mock both implement it: call `grounder.prefetch?.(...)`.
+  prefetch?(req: { target: string; shot?: Shot; precise?: boolean }): void
+  // The screen changed: drop cached and prefetched results.
+  invalidate?(): void
 }
 
 export type VerifyRequest = ({ step: LessonStep } | { expected: string }) & { shot?: Shot }
@@ -47,7 +54,9 @@ export interface LessonArchitect {
 }
 
 export interface ScamAnalyst {
-  analyze(req: { text?: string; shot?: Shot; url?: string }): Promise<ScamReport>
+  // `onProgress` gets short plain-English status lines as the check moves through its stages
+  // ('Checking the link…', 'Checking the wording…', 'Checking who it says it is…', 'Putting it together…'); show the latest.
+  analyze(req: { text?: string; shot?: Shot; url?: string }, opts?: { onProgress?: (message: string) => void }): Promise<ScamReport>
 }
 
 export interface Router {

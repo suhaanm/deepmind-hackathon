@@ -26,9 +26,9 @@ Legend: PASS / FAIL / PARTIAL (works with mocks only) / UNVERIFIED (not run yet)
 | 8 | Settings toggles take effect | UNVERIFIED | e2e `settings` | - |
 | 9 | `doItForMeAllowed` defaults to false | UNVERIFIED | e2e `settings` | - |
 | 10 | `ask_user_confirm` resolves only on a real answer (never from model text / `/inject`) | UNVERIFIED | e2e `trust` | - |
-| 11 | Screenshots carry `store:false` | UNVERIFIED | static grep of `src/main/gemini/**` + request-body capture in replay/real mode | - |
-| 12 | No secrets in logs / repo / renderer bundles / `/state` | UNVERIFIED | e2e `security` (grep for `AIza`) | - |
-| 13 | Debug server binds 127.0.0.1 only and rejects `Origin` / foreign `Host` | UNVERIFIED | e2e `security` | - |
+| 11 | Screenshots carry `store:false` | PARTIAL: static PASS (`src/main/gemini/client.ts` forces `store:false` on every `interactions.create`); runtime request-body check pending real run | grep + e2e `08-privacy-spend` (fetch probe reads the real request body) | 13:50 |
+| 12 | No secrets in logs / repo / renderer bundles / `/state` | PASS (mock run, app log + userData + out/ + repo + /state + /health scanned for key shape and the real key value) | e2e `07-security` | 13:50 |
+| 13 | Debug server binds 127.0.0.1 only and rejects `Origin` / foreign `Host` | PASS (lsof shows 127.0.0.1 only, Origin and foreign Host give 403, LAN address refused) | e2e `07-security` | 13:50 |
 | 14 | Failure paths: Architect timeout -> static plan, grounder `found:false` -> "can't see that", API error -> plain-English error, no stack traces | UNVERIFIED | e2e `failures` (real services only) | - |
 
 ## Open bugs

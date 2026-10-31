@@ -1,9 +1,9 @@
+// Adapted from google-gemini/gemini-live-api-examples — gemini-live-ephemeral-tokens-websocket/frontend/geminilive.js (socket setup/receive; the example has no reconnect logic)
 // WebSocket transport for the Live API with transparent session resumption.
-// Adapted from google-gemini/gemini-live-api-examples (frontend/geminilive.js); the example has no reconnect logic.
 //
-// Contract: connect() resolves after setupComplete. Afterwards the connection survives GoAway (make-before-break:
-// a second socket is opened with the latest resumption handle and swapped in while the old one still serves audio)
-// and unexpected drops (retry with backoff, resuming when a handle exists). Callers only ever see events.
+// Contract: connect() resolves after setupComplete. Afterwards the connection survives GoAway (the socket is replaced
+// when the session is resumable, using the latest resumption handle) and unexpected drops (retry with backoff, resuming
+// when a handle exists). After the retries run out onClosed fires with expected=false. Callers only ever see events.
 import { decodeFrame, liveUrl, parseServerMessage, type LiveAuth, type LiveServerEvent } from './wire'
 
 export type ConnState = 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed'
@@ -30,6 +30,22 @@ export interface ConnectionOptions {
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e: unknown) => {
+        clearTimeout(timer)
+        reject(e instanceof Error ? e : new Error(String(e)))
+      },
+    )
+  })
+}
 
 export class LiveConnection {
   state: ConnState = 'idle'
@@ -84,8 +100,7 @@ export class LiveConnection {
   // Opens a socket, sends setup and resolves once the server answers setupComplete.
   private openSocket(handle: string | null): Promise<WebSocket> {
     return new Promise<WebSocket>((resolve, reject) => {
-      this.opts
-        .getAuth()
+      withTimeout(this.opts.getAuth(), this.opts.setupTimeoutMs ?? 10_000, 'Live token request timed out')
         .then((auth) => {
           const ws = new this.WS(liveUrl(auth))
           ws.binaryType = 'arraybuffer'
@@ -152,29 +167,25 @@ export class LiveConnection {
     this.opts.onEvent(e)
   }
 
+  // GoAway: reconnect on our own schedule before the server cuts us off. The server allows ONE client per session
+  // (a second concurrent socket is refused with 1008 "already connected"; verified), so this is break-before-make:
+  // wait for a moment the session is resumable (the model is idle), close, then resume straight away.
   private async handover(timeLeftMs: number): Promise<void> {
     if (this.handingOver || this.state !== 'open') return
     this.handingOver = true
-    this.opts.onReconnecting?.('goaway')
-    const deadline = Date.now() + Math.max(0, timeLeftMs - 2500)
+    const deadline = Date.now() + Math.max(0, timeLeftMs - 3000)
     try {
-      while (!this.resumable && Date.now() < deadline && this.state === 'open') await sleep(120)
-      if (this.state !== 'open') return
-      const next = await this.openSocket(this.handle)
+      while (!this.resumable && Date.now() < deadline && this.state === 'open') await sleep(100)
       const old = this.sock
-      this.sock = next
-      if (old) {
-        this.superseded.add(old)
-        try {
-          old.close(1000, 'handover')
-        } catch {
-          /* ignore */
-        }
+      if (this.state !== 'open' || !old) return
+      this.superseded.add(old)
+      this.sock = null
+      try {
+        old.close(1000, 'handover')
+      } catch {
+        /* ignore */
       }
-      this.opts.onReconnected?.({ resumed: this.handle !== null })
-    } catch (err) {
-      // Keep serving on the old socket; if it dies the normal reconnect path takes over.
-      this.log('handover failed', err)
+      await this.reconnectLoop(1000, 'handover', 'goaway')
     } finally {
       this.handingOver = false
     }
@@ -188,15 +199,17 @@ export class LiveConnection {
       return
     }
     this.sock = null
-    void this.reconnectLoop(code, reason)
+    void this.reconnectLoop(code, reason, 'dropped')
   }
 
-  private async reconnectLoop(code: number, reason: string): Promise<void> {
+  private async reconnectLoop(code: number, reason: string, why: 'goaway' | 'dropped'): Promise<void> {
     this.state = 'reconnecting'
-    this.opts.onReconnecting?.('dropped')
-    const max = this.opts.maxReconnectAttempts ?? 4
+    this.opts.onReconnecting?.(why)
+    // 250, 500, 1000, 2000, 3000, 3000 ms: rides out a ~10 s network blip before telling the user.
+    const max = this.opts.maxReconnectAttempts ?? 6
     let lastError = `${code}${reason ? `: ${reason}` : ''}`
     for (let attempt = 0; attempt < max; attempt++) {
+      // The first pause also lets the server register the old socket's close before the resume (it refuses two clients).
       await sleep(Math.min(250 * 2 ** attempt, 3000))
       if (this.expectedClose) return
       try {

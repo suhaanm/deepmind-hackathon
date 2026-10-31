@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { app, BrowserWindow, screen, session } from 'electron'
 import type { DockMode, EventArgs, EventChannel } from '../shared/ipc'
+import { configureOverlayWindow } from './capture/overlay-window'
 
 export interface WindowOptions {
   noOverlay: boolean
@@ -19,8 +20,8 @@ export interface Windows {
 }
 
 const DOCK_SIZES: Record<DockMode, { width: number; height: number }> = {
-  compact: { width: 400, height: 460 },
-  expanded: { width: 600, height: 780 },
+  compact: { width: 380, height: 80 },
+  expanded: { width: 380, height: 620 },
 }
 const MARGIN = 16
 
@@ -95,6 +96,7 @@ export function createWindows(opts: WindowOptions): Windows {
     overlay.setAlwaysOnTop(true, 'screen-saver')
     overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
     overlay.setBounds({ x, y, width, height })
+    configureOverlayWindow(overlay)
     loadRenderer(overlay, 'overlay')
     if (!opts.headless) overlay.once('ready-to-show', () => overlay?.showInactive())
   }

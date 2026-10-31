@@ -170,7 +170,7 @@ function LevelChip(opts = {}) {
   const bars = h('div', { class: 'al-level__bars', 'aria-hidden': 'true' }, [1, 2, 3, 4].map(() => h('span', { class: 'al-level__bar' })));
   const kicker = h('span', { class: 'al-level__kicker' });
   const name = h('span', { class: 'al-level__name' });
-  const lock = h('span', { class: 'al-level__lock', hidden: true }, icon('lock'), 'Locked');
+  const lock = h('span', { class: 'al-level__lock', hidden: true }, icon('lock'), h('span', { class: 'al-level__locktext' }, 'Locked'));
   const delta = h('span', { class: 'al-level__delta', 'aria-hidden': 'true' });
   const live = h('span', { class: 'al-sr', 'aria-live': 'polite' });
   const root = h('div', { class: 'al-level' + (variant === 'compact' ? ' al-level--compact' : '') + (variant === 'hero' ? ' al-level--hero' : ''), role: 'group' },

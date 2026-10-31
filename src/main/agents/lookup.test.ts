@@ -58,7 +58,7 @@ describe('lookup agent', () => {
     const chip = await runLookup(f)
     expect(chip.summary).toMatch(/could not confirm these online/)
     expect(chip.result).toEqual({ kind: 'lookup', text: '1. Open Settings.' })
-    expect(f.injected[0]!.text).toMatch(/unverified/)
+    expect(f.injected[0]!.text).toMatch(/unconfirmed/)
   })
 
   it('does not guess when the model has no reliable steps', async () => {

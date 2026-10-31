@@ -59,7 +59,7 @@ export function Overlay(): ReactElement {
     return () => clearTimeout(timer)
   }, [state, style.transition.exitMs, tick])
 
-  const persona = state && settings.persona ? PERSONAS[settings.persona] : null
+  const persona = settings.persona ? PERSONAS[settings.persona] : null
   return (
     <OverlayScene
       state={state}

@@ -1,5 +1,5 @@
 // Generates docs/design-preview/index.html: one self-contained page (inline CSS, JS, fonts), no network.
-// Usage: node build.mjs   (needs `esbuild` and the two @fontsource packages resolvable from FONT_ROOT; see below)
+// Usage: node src/renderer/design/preview/build.mjs   (uses the repo's typescript and @fontsource packages)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const design = resolve(here, '..');
 const repo = resolve(design, '../../..');
-const root = process.env.FONT_ROOT ?? repo;
+const root = repo;
 const req = createRequire(join(root, 'package.json'));
-const esbuild = req('esbuild');
+const ts = req('typescript');
+if (typeof ts.transpileModule !== 'function') throw new Error('typescript with transpileModule is required (TypeScript 6 or older)');
 
 const read = (p) => readFileSync(p, 'utf8');
 const font = (pkg, file) => readFileSync(req.resolve(`@fontsource/${pkg}/files/${file}`)).toString('base64');
@@ -32,7 +33,7 @@ if (!dark) throw new Error('dark block not found in tokens.css');
 tokens = tokens.replace(darkRe, `@media (prefers-color-scheme: dark) {\n  :root:not([data-theme='light']):not([data-high-contrast='true']) {${dark[1].replace(/\n/g, '\n  ')}\n  }\n}\n:root[data-theme='dark'] {${dark[1]}\n}`);
 
 const transpile = (file) =>
-  esbuild.transformSync(read(file), { loader: 'ts', format: 'esm', target: 'es2020' }).code.replace(/^export /gm, '');
+  ts.transpileModule(read(file), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText.replace(/^export /gm, '');
 
 const html = `<title>Alongside UI Preview</title>
 <meta name="claude:viewport-fit-sides" content="cover">

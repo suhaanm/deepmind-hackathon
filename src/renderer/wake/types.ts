@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import type { WakeMatcherOptions, WakePersona } from './matcher'
 
 // Why the spotter is not listening. Several can be active at once; it listens only when none are.
@@ -84,6 +85,8 @@ export interface WakeSpotterOptions<Id extends string = string> {
   cooldownMs?: number
   // Keep capturing locally (no network) this long after `pause('live')`, so LIVE can take the pre-roll (default 6000).
   handoffMs?: number
+  // An unchanged interim transcript counts as final after this long (default 1200).
+  stableInterimMs?: number
   // Proactively reconnect before the 10-minute connection cap (default 540000).
   maxSessionMs?: number
 }

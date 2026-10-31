@@ -1,6 +1,6 @@
-// Browser audio IO for the Live session. Adapted from google-gemini/gemini-live-api-examples
-// (frontend/mediaUtils.js AudioStreamer/AudioPlayer, audio-processors/*.worklet.js); worklets are inlined as Blob URLs so
-// no static asset path is needed under electron-vite. See THIRD_PARTY_NOTICES.md.
+// Adapted from google-gemini/gemini-live-api-examples — gemini-live-ephemeral-tokens-websocket/frontend/mediaUtils.js (AudioStreamer, AudioPlayer) and
+// gemini-live-ephemeral-tokens-websocket/frontend/audio-processors/capture.worklet.js, playback.worklet.js
+// Browser audio IO for the Live session; worklets are inlined as Blob URLs so no static asset path is needed under electron-vite.
 import type { AudioInput, AudioOutput } from './types'
 import { base64ToBytes, floatToPcm16Base64 } from './wire'
 

@@ -41,14 +41,16 @@ class WavMic implements WakeAudioSource {
   }
 }
 
-async function run(id: string, listenMs: number): Promise<{ wakes: WakeEvent[]; latencyMs: number | null }> {
+async function run(id: string, listenMs: number): Promise<{ wakes: WakeEvent[]; latencyMs: number | null; heard: string[] }> {
   const mic = new WavMic(wavPcm(id))
   const wakes: WakeEvent[] = []
   let wokeAt = 0
+  const heard: string[] = []
   const spotter = createWakeSpotter({
     personas: PERSONA_LIST,
     getToken: () => mintWakeToken(),
     createAudioSource: () => mic,
+    onDebug: (text, final) => heard.push(`${final ? 'F' : 'i'}:${text}`),
     onWake: (e) => {
       wokeAt = Date.now()
       wakes.push(e)
@@ -57,7 +59,7 @@ async function run(id: string, listenMs: number): Promise<{ wakes: WakeEvent[]; 
   await spotter.start()
   await new Promise((r) => setTimeout(r, listenMs))
   spotter.dispose()
-  return { wakes, latencyMs: wokeAt && mic.speechEndedAt ? wokeAt - mic.speechEndedAt : null }
+  return { wakes, latencyMs: wokeAt && mic.speechEndedAt ? wokeAt - mic.speechEndedAt : null, heard }
 }
 
 describe.skipIf(!enabled || !existsSync(audioDir))('wake spotter end-to-end through gemini-3.5-transcribe-live', () => {
@@ -72,15 +74,15 @@ describe.skipIf(!enabled || !existsSync(audioDir))('wake spotter end-to-end thro
   ]
   const latencies: number[] = []
   it.each(positives)('wakes on %s -> %s', async (id, persona) => {
-    const { wakes, latencyMs } = await run(id, 9000)
-    expect(wakes.map((w) => w.personaId)).toEqual([persona])
+    const { wakes, latencyMs, heard } = await run(id, 9000)
+    expect(wakes.map((w) => w.personaId), `recogniser said: ${JSON.stringify(heard)}`).toEqual([persona])
     if (latencyMs !== null) latencies.push(latencyMs)
     console.log(`[wake-e2e] ${id} -> ${wakes[0]!.personaId} heard=${JSON.stringify(wakes[0]!.heard)} score=${wakes[0]!.score.toFixed(2)} latency-after-end-of-speech=${latencyMs}ms`)
   }, 20_000)
 
   const negatives = ['neg-google.daniel', 'neg-alexa.samantha', 'neg-aurelius.samantha', 'neg-mark.rishi', 'neg-america.daniel', 'neg-emily.rishi', 'neg-musicus.daniel', 'neg-help.samantha', 'neg-chat.daniel', 'neg-amelia-past.rishi']
   it.each(negatives)('does NOT wake on %s', async (id) => {
-    const { wakes } = await run(id, 10_000)
-    expect(wakes).toEqual([])
+    const { wakes, heard } = await run(id, 10_000)
+    expect(wakes, `recogniser said: ${JSON.stringify(heard)}`).toEqual([])
   }, 25_000)
 })

@@ -472,3 +472,40 @@ describe('carer digest', () => {
     expect(d.data?.confidence).toEqual({ first: null, latest: null, points: 0 })
   })
 })
+
+describe('demo seed fixture', () => {
+  const seed = fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'demo-profile.md'), 'utf8')
+
+  it('starts video_call at L2 with a memory callback, and nothing else invented', async () => {
+    fs.writeFileSync(file(), seed)
+    const store = make()
+    const snap = await store.load()
+    expect(snap.skills.video_call).toMatchObject({ level: 2, streakClean: 0, lastSeen: T0 - DAY_MS, nextReview: T0 })
+    expect(snap.skills.spot_scam.level).toBe(1)
+    expect(snap.skills.bigger_text.level).toBe(1)
+    expect(snap.attempts).toEqual([]) // no fabricated history: the hints chart fills from real attempts
+    expect(snap.lastSession).toMatchObject({ skillId: 'video_call', at: T0 - DAY_MS })
+    expect(snap.lastSession?.summary).toContain('green Start call button')
+    expect(snap.whatWorks[0]).toMatch(/phone book/)
+    expect(snap.avoidJargon).toEqual(['browser', 'URL', 'swipe'])
+  })
+
+  it('reset: replacing profile.md while the app runs is picked up by refresh()', async () => {
+    const store = make()
+    await store.load()
+    expect(store.snapshot().skills.video_call.level).toBe(1)
+    fs.writeFileSync(file(), seed)
+    await store.refresh()
+    expect(store.snapshot().skills.video_call.level).toBe(2)
+    await store.recordAttempt(attempt({ levelAtStart: 2, hintsUsed: 0 }))
+    expect(store.snapshot().skills.video_call.level).toBe(3)
+    fs.writeFileSync(file(), seed) // reset to the seed
+    await store.refresh()
+    expect(store.snapshot().skills.video_call.level).toBe(2)
+    expect(store.snapshot().attempts).toEqual([])
+    fs.rmSync(file()) // or delete it: back to a blank profile
+    await store.refresh()
+    expect(store.snapshot().skills.video_call.level).toBe(1)
+    expect(fs.existsSync(file())).toBe(true)
+  })
+})

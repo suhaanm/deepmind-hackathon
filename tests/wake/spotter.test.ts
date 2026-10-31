@@ -92,6 +92,32 @@ describe('wake spotter', () => {
     expect(r.wakes[0]).toMatchObject({ personaId: 'amelia', source: 'wake', score: 1, trailing: 'how do i join the video call' })
   })
 
+  it('an interim that stands unchanged counts as an utterance end, so a bare "Amelia." still wakes (ASR dropped "hey")', async () => {
+    const r = rig()
+    await r.spotter.start()
+    r.last().h.onTranscript('Amelia.', false)
+    await vi.advanceTimersByTimeAsync(600)
+    r.last().h.onTranscript('Amelia.', false)
+    expect(r.wakes).toHaveLength(0)
+    await vi.advanceTimersByTimeAsync(700)
+    r.last().h.onTranscript('Amelia.', false)
+    expect(r.wakes).toHaveLength(1)
+    expect(r.wakes[0]!.personaId).toBe('amelia')
+  })
+
+  it('a bare name that keeps growing into a sentence never wakes, however long it stands', async () => {
+    const r = rig()
+    await r.spotter.start()
+    r.last().h.onTranscript('Marcus', false)
+    await vi.advanceTimersByTimeAsync(1500)
+    r.last().h.onTranscript('Marcus Aurelius', false)
+    await vi.advanceTimersByTimeAsync(1500)
+    r.last().h.onTranscript('Marcus Aurelius', false)
+    await vi.advanceTimersByTimeAsync(1500)
+    r.last().h.onTranscript('Marcus Aurelius was a Roman emperor', false)
+    expect(r.wakes).toHaveLength(0)
+  })
+
   it('stops streaming to the cloud right after a wake, and the cooldown swallows a duplicate', async () => {
     const r = rig()
     await r.spotter.start()

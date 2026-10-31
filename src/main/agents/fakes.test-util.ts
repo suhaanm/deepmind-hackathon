@@ -39,6 +39,7 @@ export function makeLearner(over: Partial<LearnerSnapshot> = {}): LearnerSnapsho
 export interface Fakes {
   deps: AgentDeps
   calls: string[]
+  groundReqs: { target: string; precise?: boolean; shotId?: string }[]
   chipsPatched: AgentChip[][]
   busEvents: AgentChip[]
   injected: { text: string; interrupt?: boolean }[]
@@ -47,7 +48,7 @@ export interface Fakes {
   files: Map<string, string>
   settings: Settings
   set: {
-    analyze?: (req: { text?: string; shot?: Shot; url?: string }) => Promise<ScamReport>
+    analyze?: (req: { text?: string; shot?: Shot; url?: string }, opts?: { onProgress?: (message: string) => void }) => Promise<ScamReport>
     ground?: (target: string) => Promise<GroundResult>
     extract?: () => Promise<string>
     search?: () => Promise<GroundedAnswer>
@@ -61,6 +62,7 @@ export function makeFakes(settingsPatch: Partial<Settings> = {}): Fakes {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...settingsPatch }
   const f: Fakes = {
     calls: [],
+    groundReqs: [],
     chipsPatched: [],
     busEvents: [],
     injected: [],
@@ -82,17 +84,18 @@ export function makeFakes(settingsPatch: Partial<Settings> = {}): Fakes {
       },
     },
     grounder: {
-      ground: async ({ target }) => {
+      ground: async ({ target, precise, shot }) => {
         f.calls.push(`grounder.ground:${target}`)
+        f.groundReqs.push({ target, precise, shotId: shot?.id })
         if (f.set.ground) return f.set.ground(target)
         boxN += 1
         return { found: true, box: { xmin: 100, ymin: 100 * boxN, xmax: 400, ymax: 100 * boxN + 40 }, confidence: 0.9, latencyMs: 5, model: 'fake' }
       },
     },
     scam: {
-      analyze: async (req) => {
+      analyze: async (req, opts) => {
         f.calls.push('scam.analyze')
-        return f.set.analyze ? f.set.analyze(req) : makeReport()
+        return f.set.analyze ? f.set.analyze(req, opts) : makeReport()
       },
     },
     overlay: {

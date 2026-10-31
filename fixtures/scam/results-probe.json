@@ -1,0 +1,137 @@
+{
+ "tag": "probe",
+ "tp": 2,
+ "fn": 0,
+ "scAbstain": 0,
+ "fp": 0,
+ "tn": 1,
+ "geAbstain": 0,
+ "p50": 11640,
+ "p95": 12466,
+ "results": [
+  {
+   "id": "genuine/01-gp-reminder",
+   "truth": "genuine",
+   "report": {
+    "verdict": "likely_genuine",
+    "confidence": 0.9,
+    "redFlags": [],
+    "advice": [
+     "This looks like a normal appointment reminder because it does not ask for personal details or include any links.",
+     "We can never be completely certain who sent a text message.",
+     "If you do not recognise this appointment, call your GP surgery using the phone number on your appointment card or a recent letter."
+    ],
+    "humanHelp": "If you are unsure, hang up or stop replying, then call the number printed on the back of your bank card, or ask someone you trust, or call Age UK. You can forward scam texts to 7726 for free.",
+    "models": [
+     "gemini-3.8-flash",
+     "gemini-4-argon"
+    ],
+    "latencyMs": 7185
+   },
+   "verbatimOk": true,
+   "saidSafe": false,
+   "humanOk": true,
+   "progress": [
+    "Checking the wording…",
+    "Checking who it says it is…",
+    "Putting it together…"
+   ]
+  },
+  {
+   "id": "scam/01-bank-lockout",
+   "truth": "scam",
+   "report": {
+    "verdict": "likely_scam",
+    "confidence": 0.9,
+    "redFlags": [
+     {
+      "phrase": "https://brightway-bank.secure-verify.example/login",
+      "why": "This is a fake web address disguised to look like a real bank."
+     },
+     {
+      "phrase": "within 2 hours",
+      "why": "Real banks will not give you a two-hour deadline to unlock your account."
+     },
+     {
+      "phrase": "money will be frozen",
+      "why": "Threatening to freeze your money is a common trick to make you panic."
+     },
+     {
+      "phrase": "account has been LOCKED",
+      "why": "Using capital letters to say your account is locked creates sudden fear."
+     }
+    ],
+    "advice": [
+     "Do not click the link or enter any personal details.",
+     "If you bank with Brightway, call the number on the back of your bank card to check your account.",
+     "You can forward scam text messages to 7726 for free to report them, then delete the message."
+    ],
+    "humanHelp": "If you are unsure, hang up or stop replying, then call the number printed on the back of your bank card, or ask someone you trust, or call Age UK. You can forward scam texts to 7726 for free.",
+    "models": [
+     "gemini-3.8-flash",
+     "gemini-4-argon"
+    ],
+    "latencyMs": 11640
+   },
+   "verbatimOk": true,
+   "saidSafe": false,
+   "humanOk": true,
+   "progress": [
+    "Checking the link…",
+    "Checking the wording…",
+    "Checking who it says it is…",
+    "Putting it together…"
+   ]
+  },
+  {
+   "id": "scam/06-energy-disconnect",
+   "truth": "scam",
+   "report": {
+    "verdict": "likely_scam",
+    "confidence": 0.9,
+    "redFlags": [
+     {
+      "phrase": "Your supply will be disconnected tomorrow at 9am",
+      "why": "UK energy companies must follow strict rules and never cut you off overnight by text."
+     },
+     {
+      "phrase": "unless you pay immediately.",
+      "why": "Scammers rush you into paying before you have time to check if the bill is real."
+     },
+     {
+      "phrase": "https://northfield-energy-bill.example/now",
+      "why": "This web address looks unusual and is likely a fake payment page."
+     },
+     {
+      "phrase": "Call 07700 900345",
+      "why": "Energy companies use freephone or landline numbers for customer service, not mobile numbers."
+     },
+     {
+      "phrase": "FINAL NOTICE:",
+      "why": "Uses alarming capital letters to make you panic."
+     }
+    ],
+    "advice": [
+     "Do not click the link or call the mobile number in the message.",
+     "Check your energy account by calling the number on a real paper bill, or by logging in through your usual website or app.",
+     "You can forward scam texts to 7726 for free to report them to your mobile provider."
+    ],
+    "humanHelp": "If you are unsure, hang up or stop replying, then call the number printed on the back of your bank card, or ask someone you trust, or call Age UK. You can forward scam texts to 7726 for free.",
+    "models": [
+     "gemini-3.8-flash",
+     "gemini-4-argon"
+    ],
+    "latencyMs": 12466
+   },
+   "verbatimOk": true,
+   "saidSafe": false,
+   "humanOk": true,
+   "progress": [
+    "Checking the link…",
+    "Checking the wording…",
+    "Checking who it says it is…",
+    "Putting it together…"
+   ]
+  }
+ ]
+}

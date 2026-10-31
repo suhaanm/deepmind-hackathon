@@ -1,5 +1,5 @@
-// Adapted from google-gemini/gemini-live-api-examples (gemini-live-ephemeral-tokens-websocket/frontend/geminilive.js).
-// The hackathon guide points builders at that repo; it ships no LICENSE file. See THIRD_PARTY_NOTICES.md.
+// Adapted from google-gemini/gemini-live-api-examples — gemini-live-ephemeral-tokens-websocket/frontend/geminilive.js
+// (the repo has no LICENSE file; the hackathon guide points builders to it. See THIRD_PARTY_NOTICES.md)
 //
 // Pure protocol layer: message builders and a server-message parser. No DOM, no Electron, no shared-runtime imports,
 // so it runs unchanged in the renderer, in vitest and in the Node smoke test.

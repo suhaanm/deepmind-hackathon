@@ -1,0 +1,5 @@
+{
+  "startedAt": "2026-10-31T13:51:14.417Z",
+  "checks": {},
+  "error": "Error: timed out waiting for stage window\n    at waitFor (file:///Users/suhaan/Desktop/hackathon/deepmind-hackathon/src/renderer/overlay/harness/real-check.mjs:59:9)\n    at async file:///Users/suhaan/Desktop/hackathon/deepmind-hackathon/src/renderer/overlay/harness/real-check.mjs:107:3"
+}

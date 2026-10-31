@@ -8,6 +8,9 @@ export interface GeminiEngineOptions {
   getToken(): Promise<WakeToken>
   // Bias recognition toward the persona names (derived from wakePhrases). Up to ~100 terms work best.
   vocabulary?: readonly string[]
+  // Language hints. Without them the recogniser auto-detects and mangles short names ("Hey Amelia" -> "miudo",
+  // "Hey Marcus" -> "Hey Maracas") on some voices; English hints fixed every such case in the spike.
+  languageCodes?: readonly string[]
   model?: string
   // Pass 'v1alpha' when authenticating with an ephemeral token (the default here); Node tests with a raw key use 'v1beta'.
   apiVersion?: string
@@ -38,7 +41,10 @@ export function createGeminiEngineFactory(options: GeminiEngineOptions): WakeEng
           model: options.model ?? t.model ?? TRANSCRIBE_MODEL,
           config: {
             responseModalities: [Modality.TEXT],
-            inputAudioTranscription: options.vocabulary?.length ? { customVocabulary: [...options.vocabulary] } : {},
+            inputAudioTranscription: {
+              languageCodes: [...(options.languageCodes ?? ['en-GB', 'en-US'])],
+              ...(options.vocabulary?.length ? { customVocabulary: [...options.vocabulary] } : {}),
+            },
           },
           callbacks: {
             onopen: () => {

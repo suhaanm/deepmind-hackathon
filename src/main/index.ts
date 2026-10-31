@@ -53,13 +53,13 @@ void app.whenReady().then(async () => {
   })
 
   const services = createServices(ctx)
-  if (flag('ALONGSIDE_DEV_STAGE')) void import('./dev').then((dev) => dev.installDev({ ctx, services })) // QA hooks (dev only)
+  if (flag('ALONGSIDE_DEV_STAGE') || flag('ALONGSIDE_RECORD') || process.env.ALONGSIDE_REPLAY) void import('./dev').then((dev) => dev.installDev({ ctx, services })) // QA hooks + record/replay (dev only)
   const confirm = new ConfirmBroker(state)
   const dispatch = createDispatcher(ctx, services, confirm)
   const session = registerSession(ctx, services, confirm)
   registerIpc({ ctx, services, windows, dispatch, confirm, session })
 
-  const unregisterHotkeys = registerHotkeys(bus, settings)
+  const unregisterHotkeys = registerHotkeys(bus, settings, { state, stop: (r) => session.stop(r) })
   app.on('will-quit', () => {
     unregisterHotkeys()
     services.agents.dispose?.() // AGENTS hook: dispose on quit

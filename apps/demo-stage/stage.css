@@ -169,7 +169,7 @@ button { cursor: pointer; background: none; border: 0; padding: 0; }
 .win-btn.close:hover { background: var(--danger); color: var(--on-danger); }
 .win-btn .ic { width: 1.05rem; height: 1.05rem; }
 .win-body { flex: 1; min-height: 0; display: flex; position: relative; }
-@media (max-width: 1000px) { .window { inset: .5rem; } .icons { display: none; } }
+@media (max-width: 1000px) { .window { inset: .5rem .5rem .5rem 7.5rem; } }
 
 /* ---------- Shared controls ---------- */
 .btn {
@@ -196,7 +196,9 @@ button { cursor: pointer; background: none; border: 0; padding: 0; }
 :root[data-contrast="high"] .switch { border-color: #fff; }
 select { min-height: 2.3rem; padding: 0 .6rem; border-radius: .5rem; border: var(--bw) solid var(--border); background: var(--surface); color: var(--text); }
 input[type="text"], input[type="search"].plain { min-height: 2.3rem; padding: 0 .7rem; border-radius: .5rem; border: var(--bw) solid var(--border); background: var(--surface); color: var(--text); }
-input[type="range"] { accent-color: var(--primary); height: 2rem; cursor: pointer; }
+input[type="range"] { -webkit-appearance: none; appearance: none; background: transparent; height: 2rem; cursor: pointer; margin: 0; }
+input[type="range"]::-webkit-slider-runnable-track { height: .6rem; border-radius: 99px; background: linear-gradient(to right, var(--primary) calc(.875rem + (100% - 1.75rem) * var(--f, 0)), color-mix(in srgb, var(--text) 25%, transparent) calc(.875rem + (100% - 1.75rem) * var(--f, 0))); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 1.75rem; height: 1.75rem; margin-top: -.575rem; border-radius: 50%; background: var(--primary); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--text); }
 .avatar { width: 2.8rem; height: 2.8rem; border-radius: 50%; display: grid; place-items: center; font-weight: 700; color: #fff; background: var(--c, #475569); flex: none; letter-spacing: .02em; }
 .avatar.xl { width: 6rem; height: 6rem; font-size: 2.2rem; }
 .empty { flex: 1; display: grid; place-content: center; justify-items: center; gap: .6rem; color: var(--muted); text-align: center; padding: 1rem; }
@@ -319,6 +321,7 @@ input[type="range"] { accent-color: var(--primary); height: 2rem; cursor: pointe
 
 /* ---------- Settings ---------- */
 .set-nav { width: clamp(14rem, 26%, 18rem); flex: none; background: var(--surface-2); border-right: var(--bw) solid var(--border); padding: .9rem .75rem; display: flex; flex-direction: column; gap: .6rem; overflow: auto; }
+.set-nav .search { flex: none; }
 .set-nav nav { display: flex; flex-direction: column; gap: .15rem; }
 .nav-item { display: flex; align-items: center; gap: .7rem; padding: .65rem .75rem; border-radius: .6rem; text-align: left; font-weight: 600; }
 .nav-item:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
@@ -326,12 +329,11 @@ input[type="range"] { accent-color: var(--primary); height: 2rem; cursor: pointe
 .nores { padding: .5rem; }
 .set-panels { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 1.2rem 1.5rem 2rem; background: var(--bg); }
 .panel > h2 { font-size: 1.6rem; margin-bottom: .9rem; }
-.ts-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.ts-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: .5rem 1rem; }
+.ts-head > div:first-child { flex: 1 1 14rem; }
 .ts-value { font-size: 1.15rem; font-weight: 800; padding: .25rem .7rem; border-radius: .5rem; background: var(--surface-2); border: var(--bw) solid var(--border); white-space: nowrap; }
 .ts-row { display: flex; align-items: center; gap: .9rem; margin: 1rem 0 .4rem; }
 .ts-row input[type="range"] { flex: 1; min-width: 6rem; height: 2.2rem; }
-.ts-row input[type="range"]::-webkit-slider-runnable-track { height: .6rem; border-radius: 99px; background: color-mix(in srgb, var(--text) 25%, transparent); }
-.ts-row input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 1.75rem; height: 1.75rem; margin-top: -.575rem; border-radius: 50%; background: var(--primary); border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--text); }
 .ts-btn { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 4.5rem; padding: .35rem .7rem; border-radius: .7rem; border: var(--bw) solid var(--border); background: var(--surface); font-weight: 700; }
 .ts-btn:hover { background: var(--surface-2); border-color: var(--muted); }
 .ts-btn .ts-a { font-weight: 800; line-height: 1.1; }

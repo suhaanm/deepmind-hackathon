@@ -25,6 +25,10 @@ export const DECAY_AFTER_DAYS: Partial<Record<HelpLevel, number>> = { 2: 3, 3: 7
 export const REVIEW_DAYS = [1, 3, 7, 14, 30] as const
 // Attempt-scope step-down triggers (per step).
 export const STEP_DOWN_AT = { hints: 2, errors: 2, stalls: 2 } as const
+// In-lesson adaptive fading: this many clean steps in a row ease the help off for the remaining steps;
+// this many struggling steps in a row bring it back.
+export const FADE_AFTER_CLEAN_STEPS = 2
+export const REGRESS_AFTER_STRUGGLE_STEPS = 2
 
 export type OverrideKind = 'show_again' | 'let_me_try'
 
@@ -168,6 +172,9 @@ export interface AttemptLevelState {
   stalls: number
   anxiety: boolean
   steppedDown: boolean
+  // Consecutive clean / struggling steps; drive the in-lesson fade.
+  cleanRun: number
+  struggleRun: number
 }
 
 export type AttemptSignal = 'hint' | 'error' | 'stall' | 'anxiety'
@@ -185,6 +192,8 @@ export function startAttemptLevel(base: HelpLevel): AttemptLevelState {
     stalls: 0,
     anxiety: false,
     steppedDown: false,
+    cleanRun: 0,
+    struggleRun: 0,
   }
 }
 
@@ -192,37 +201,77 @@ export function beginStepCounters(s: AttemptLevelState): AttemptLevelState {
   return { ...s, stepHints: 0, stepErrors: 0, stepStalls: 0 }
 }
 
-function stepDownTarget(s: AttemptLevelState): HelpLevel {
-  // Someone who took over ("let me try") and struggles goes back to where they were, not below it.
-  return s.override === 'let_me_try' ? s.base : clampLevel(s.base - 1)
+// One level more help than now, but never more than one below where the attempt started.
+function regressTarget(s: AttemptLevelState): HelpLevel {
+  // Someone who took over ("let me try") and struggles goes straight back to where they were, not below it.
+  if (s.override === 'let_me_try') return clampLevel(Math.min(s.current, s.base))
+  return clampLevel(Math.max(s.current - 1, s.base - 1))
 }
 
 export function recordSignal(s: AttemptLevelState, signal: AttemptSignal): { state: AttemptLevelState; stepDown: boolean } {
   const next: AttemptLevelState = { ...s }
+  // Edge-triggered: a third hint on the same step must not cascade the level down again.
+  let triggered = false
   if (signal === 'hint') {
     next.stepHints++
     next.hints++
+    triggered = next.stepHints === STEP_DOWN_AT.hints
   } else if (signal === 'error') {
     next.stepErrors++
     next.errors++
+    triggered = next.stepErrors === STEP_DOWN_AT.errors
   } else if (signal === 'stall') {
     next.stepStalls++
     next.stalls++
+    triggered = next.stepStalls === STEP_DOWN_AT.stalls
   } else {
+    triggered = !next.anxiety
     next.anxiety = true
   }
-  const triggered =
-    next.stepHints >= STEP_DOWN_AT.hints ||
-    next.stepErrors >= STEP_DOWN_AT.errors ||
-    next.stepStalls >= STEP_DOWN_AT.stalls ||
-    next.anxiety
   if (!triggered) return { state: next, stepDown: false }
-  const target = stepDownTarget(next)
-  const lowered = Math.min(next.current, target) as HelpLevel
-  const changed = lowered !== next.current
-  next.current = lowered
-  next.steppedDown = next.steppedDown || changed
+  const lowered = regressTarget(next)
+  const changed = lowered < next.current
+  if (changed) {
+    next.current = lowered
+    next.steppedDown = true
+    next.cleanRun = 0
+  }
   return { state: next, stepDown: changed }
+}
+
+export interface StepCompletion {
+  state: AttemptLevelState
+  change: 'fade' | 'regress' | 'none'
+  from: HelpLevel
+  to: HelpLevel
+}
+
+// Called when a step is verified. Adaptive fading as in the expertise-reversal effect: guidance eases off as
+// competence shows (never past base+1 within one attempt, never when the learner chose a level themselves or
+// the level is locked, never when nothing remains) and returns after two struggling steps in a row.
+export function completeStep(s: AttemptLevelState, opts: { remainingSteps: number; locked?: boolean }): StepCompletion {
+  const clean = s.stepHints === 0 && s.stepErrors === 0 && s.stepStalls === 0
+  const next: AttemptLevelState = { ...s, cleanRun: clean ? s.cleanRun + 1 : 0, struggleRun: clean ? 0 : s.struggleRun + 1 }
+  const from = s.current
+  if (opts.locked || s.override !== null) return { state: next, change: 'none', from, to: from }
+  if (clean && next.cleanRun >= FADE_AFTER_CLEAN_STEPS && opts.remainingSteps > 0) {
+    const ceiling = clampLevel(Math.min(4, s.base + 1))
+    if (s.current < ceiling) {
+      next.current = clampLevel(s.current + 1)
+      next.cleanRun = 0
+      return { state: next, change: 'fade', from, to: next.current }
+    }
+  }
+  if (!clean && next.struggleRun >= REGRESS_AFTER_STRUGGLE_STEPS) {
+    const lowered = regressTarget(next)
+    if (lowered < s.current) {
+      next.current = lowered
+      next.struggleRun = 0
+      next.steppedDown = true
+      return { state: next, change: 'regress', from, to: lowered }
+    }
+  }
+  return { state: next, change: 'none', from, to: from }
 }
 
 export function applyOverride(s: AttemptLevelState, kind: OverrideKind): AttemptLevelState {

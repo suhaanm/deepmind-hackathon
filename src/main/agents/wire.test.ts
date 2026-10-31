@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS } from '../../shared/settings'
 import { until } from './fakes.test-util'
 import { createAgentsFromServices } from './wire'
 
-function setup(settings = DEFAULT_SETTINGS) {
+function setup(settings = DEFAULT_SETTINGS, scamOverride?: Services['scam']) {
   const state = new StateStore({ ...settings })
   state.patch({ phase: 'live' })
   const bus = new Bus()
@@ -31,7 +31,7 @@ function setup(settings = DEFAULT_SETTINGS) {
   const s = {
     capture: mockCapture(),
     grounder: mockGrounder(),
-    scam: mockScam(),
+    scam: scamOverride ?? mockScam(),
     learner: mockLearner(),
     overlay: { show: (a: Annotation[]) => void shown.push(a), clear: (ids?: string[]) => void cleared.push(ids), caption: () => undefined, chip: () => undefined },
     live: { inject: (text: string) => void injected.push(text) },
@@ -51,10 +51,30 @@ describe('spawn_agent through the dispatcher', () => {
     expect(res).toHaveProperty('agentId')
     expect(t.state.get().agents[0]).toMatchObject({ kind: 'scam_check', status: 'running' })
     await until(() => t.state.get().agents[0]?.status === 'done', 5000)
-    expect(t.events).toEqual(['scam_check:running', 'scam_check:done'])
+    // Progress updates add extra running events; the chip only ever finishes once, at the end.
+    expect(t.events[0]).toBe('scam_check:running')
+    expect(t.events.at(-1)).toBe('scam_check:done')
+    expect(t.events.filter((e) => e === 'scam_check:done')).toHaveLength(1)
     expect(t.shown.flat().some((a) => a.kind === 'highlightText')).toBe(true)
     expect(t.injected[0]).toMatch(/^\[AGENT_RESULT kind=scam_check id=\S+ status=done\]/)
     expect(t.injected[0]).not.toMatch(/\bsafe\b/i)
+  })
+
+  it('forwards the analyst progress callback so the tray shows live stages', async () => {
+    const real = mockScam()
+    let received: string | undefined
+    const scam: Services['scam'] = {
+      analyze: async (req, opts) => {
+        received = typeof opts?.onProgress
+        opts?.onProgress?.('Checking the link…')
+        return real.analyze(req)
+      },
+    }
+    const t = setup(DEFAULT_SETTINGS, scam)
+    await t.dispatch('spawn_agent', { kind: 'scam_check', task: 'x', payload: { text: 'Tap here to verify your account.' } })
+    await until(() => t.state.get().agents[0]?.status === 'done', 5000)
+    expect(received).toBe('function')
+    expect(t.state.get().agents[0]?.summary).toMatch(/^This looks like a scam/)
   })
 
   it('clear_annotations removes the scam highlights we are tracking', async () => {

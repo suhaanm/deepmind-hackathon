@@ -1,31 +1,96 @@
-// STUB — owned by DESIGN after .scaffold-ready
-import { useEffect, useState } from 'react'
-import type { CompanionState } from '../../shared/protocol'
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import { DEFAULT_PERSONA, PERSONAS } from '../../shared/personas'
+import { ConfirmModal, applyDesignSettings } from '../design'
+import { useCompanionState, useSettings } from './hooks'
+import { Panel, type DockTab } from './Panel'
+import { Pill } from './Pill'
 
-export function App() {
-  const [state, setState] = useState<CompanionState | null>(null)
-  const [last, setLast] = useState<string>('')
+const ONBOARDED_KEY = 'alongside.onboarded'
+
+function readOnboarded(): boolean {
+  try {
+    return localStorage.getItem(ONBOARDED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+async function requestMicrophone(): Promise<boolean> {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    stream.getTracks().forEach((t) => t.stop())
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function App(): ReactElement | null {
+  const state = useCompanionState()
+  const [settings, patchSettings] = useSettings()
+  const [expanded, setExpanded] = useState(() => !readOnboarded())
+  const [tab, setTab] = useState<DockTab>('now')
+  const [onboarded, setOnboarded] = useState(readOnboarded)
+
+  const personaId = state?.persona ?? settings?.persona ?? DEFAULT_PERSONA
+  const personaName = PERSONAS[personaId].displayName
+  const confirmPending = state?.pendingConfirm !== undefined
+  const open = expanded || confirmPending
 
   useEffect(() => {
-    void window.alongside.getState().then(setState)
-    return window.alongside.onState(setState)
+    if (settings) applyDesignSettings(settings, personaId)
+  }, [settings?.bigAnnotations, settings?.highContrast, settings?.dyslexiaFont, personaId])
+
+  useEffect(() => {
+    void window.alongside.setDockMode(open ? 'expanded' : 'compact')
+  }, [open])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && !confirmPending) setExpanded(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [confirmPending])
+
+  const finishOnboarding = useCallback(() => {
+    try {
+      localStorage.setItem(ONBOARDED_KEY, '1')
+    } catch {
+      // Private mode: the welcome simply shows again next launch.
+    }
+    setOnboarded(true)
+    setExpanded(false)
   }, [])
 
-  const pointAt = async () => {
-    const result = await window.alongside.live.toolCall({ name: 'point_at', args: { target: 'Start call button' } })
-    setLast(JSON.stringify(result))
-  }
+  if (!state || !settings) return null
+
+  const wake = (): void => window.alongside.wakeDetected({ personaId, source: 'button' })
+  const stop = (): void => window.alongside.pressStop()
 
   return (
-    <div style={{ font: '18px system-ui', padding: 12 }}>
-      <div style={{ WebkitAppRegion: 'drag', fontWeight: 600, paddingBottom: 8 } as React.CSSProperties}>Alongside (stub)</div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => window.alongside.wakeDetected({ personaId: 'marcus', source: 'button' })}>Hey Marcus</button>
-        <button onClick={pointAt}>point_at</button>
-        <button onClick={() => window.alongside.pressStop()}>Stop</button>
-      </div>
-      {last && <p>{last}</p>}
-      <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', maxHeight: 280, overflow: 'auto' }}>{JSON.stringify(state, null, 2)}</pre>
+    <div className="al-app al-dock al-dock--fill" data-phase={state.phase} data-mode={open ? 'expanded' : 'compact'}>
+      {open ? (
+        <Panel
+          state={state}
+          settings={settings}
+          personaName={personaName}
+          tab={tab}
+          onTab={setTab}
+          onCollapse={() => setExpanded(false)}
+          onStop={stop}
+          onToggleMute={() => void window.alongside.patchState({ micMuted: !state.micMuted })}
+          onWake={wake}
+          onCancelAgent={(id) => void window.alongside.cancelAgent(id)}
+          onSettings={patchSettings}
+          onboarding={onboarded ? null : { onRequestMicrophone: requestMicrophone, onDone: finishOnboarding }}
+        />
+      ) : (
+        <Pill state={state} personaName={personaName} onExpand={() => setExpanded(true)} onStop={stop} />
+      )}
+      {state.pendingConfirm ? (
+        <ConfirmModal request={state.pendingConfirm} personaName={personaName} onAnswer={(choice) => window.alongside.answerConfirm({ id: state.pendingConfirm!.id, choice })} />
+      ) : null}
     </div>
   )
 }

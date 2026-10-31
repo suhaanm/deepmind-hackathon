@@ -807,9 +807,9 @@
 }
 .al-level__delta {
   position: absolute;
-  left: 50%;
+  left: 0;
   top: calc(100% + var(--sp-2));
-  transform: translateX(-50%);
+  z-index: 5;
   padding: var(--sp-1) var(--sp-3);
   border-radius: var(--r-pill);
   background: var(--ink);
@@ -846,6 +846,9 @@
 .al-level--compact .al-level__kicker {
   display: none;
 }
+.al-level--compact .al-level__locktext {
+  display: none;
+}
 .al-level--compact .al-level__name {
   font-size: calc(var(--fs-sm) * 0.95);
 }
@@ -872,6 +875,8 @@
   padding: var(--sp-4) clamp(18px, 5vw, 40px) var(--sp-4) clamp(14px, 4vw, 32px);
 }
 .al-level--hero .al-level__delta {
+  left: 50%;
+  translate: -50% 0;
   font-size: var(--fs-md);
   padding: var(--sp-2) var(--sp-4);
 }
@@ -908,12 +913,12 @@
 @keyframes al-delta {
   0% {
     opacity: 0;
-    transform: translate(-50%, -6px);
+    transform: translateY(-6px);
   }
   12%,
   80% {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: translateY(0);
   }
   100% {
     opacity: 0;
@@ -954,7 +959,7 @@
   border-color: var(--warn-ink);
 }
 .al-caption__text {
-  font-size: var(--fs-lg);
+  font-size: var(--fs-md);
   line-height: 1.4;
   font-weight: var(--fw-body);
 }
@@ -984,8 +989,9 @@
 }
 .al-stop--compact {
   min-height: var(--target-min);
-  min-width: 68px;
-  padding: 0 14px;
+  min-width: 60px;
+  padding: 0 12px;
+  gap: 6px;
   font-size: var(--fs-sm);
 }
 
@@ -1472,6 +1478,7 @@
 /* ---------- error banner ---------- */
 .al-banner {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
@@ -1485,7 +1492,7 @@
   margin-top: 2px;
 }
 .al-banner__text {
-  flex: 1;
+  flex: 1 1 160px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
@@ -1561,7 +1568,7 @@
 .al-pill__main {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: 10px;
   flex: 1;
   min-width: 0;
   min-height: 56px;
@@ -1664,6 +1671,34 @@
 }
 .al-wake-hint strong {
   color: var(--ink);
+}
+
+/* the dock fills its window (the window supplies the outer shape) */
+.al-dock--fill {
+  max-width: none;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.al-grip {
+  flex: none;
+  width: 14px;
+  align-self: stretch;
+  display: grid;
+  place-content: center;
+  gap: 4px;
+  cursor: grab;
+}
+.al-grip span {
+  display: block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.al-grip {
+  grid-template-columns: repeat(2, 4px);
 }
 
 /* draggable region for the Electron dock (buttons stay clickable) */
@@ -2215,188 +2250,192 @@ body::before {
 <div class="al-app pv" id="app"></div>
 <script>
 const LEVEL_NAMES = {
-  1: "Watch me",
-  2: "Walk with me",
-  3: "Nudge me",
-  4: "On my own"
+    1: 'Watch me',
+    2: 'Walk with me',
+    3: 'Nudge me',
+    4: 'On my own',
 };
 const LEVEL_BLURBS = {
-  1: "I show you each step first.",
-  2: "One step at a time, and I check each one.",
-  3: "You lead. I only step in if you pause.",
-  4: "You do it your way. I stay quiet."
+    1: 'I show you each step first.',
+    2: 'One step at a time, and I check each one.',
+    3: 'You lead. I only step in if you pause.',
+    4: 'You do it your way. I stay quiet.',
 };
+// How much of the ladder is "support" at each level: drives the chip's draining bars.
 const LEVEL_SUPPORT = { 1: 4, 2: 3, 3: 2, 4: 1 };
-{
-  LEVEL_BLURBS,
-  LEVEL_NAMES,
-  LEVEL_SUPPORT
-};
 
-const ANNOTATION_TONES = ["guide", "success", "warn", "danger"];
-const INK = "#0B1220";
-const HALO = "#FFFFFF";
+/**
+ * Handoff contract: DESIGN -> OVERLAY.
+ *
+ * Pure data, no DOM, no CSS. All lengths are CSS px in the overlay window; durations are ms.
+ * Every stroke is drawn as THREE stacked layers (see `strokeLayers`): a white halo, a dark ink casing,
+ * then the coloured core. The halo separates the mark from dark screens, the casing from light screens,
+ * so each mark keeps >=3:1 edge contrast on any background. Colour is never the only cue: each tone also
+ * has a `glyph` and a `dash` pattern.
+ */
+const ANNOTATION_TONES = ['guide', 'success', 'warn', 'danger'];
+const INK = '#0B1220';
+const HALO = '#FFFFFF';
 const UI_FONT = "'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif";
 const DYSLEXIA_FONT = "'OpenDyslexic', 'Atkinson Hyperlegible', system-ui, sans-serif";
+// Okabe-Ito-derived hues, lightened so the core clears 3:1 on the ink casing.
 const CORES_NORMAL = {
-  guide: "#4FB3FF",
-  success: "#2FD39A",
-  warn: "#FFB000",
-  danger: "#FF6A4D"
+    guide: '#4FB3FF',
+    success: '#2FD39A',
+    warn: '#FFB000',
+    danger: '#FF6A4D',
 };
 const CORES_HC = {
-  guide: "#7CD0FF",
-  success: "#4DF0B2",
-  warn: "#FFD23F",
-  danger: "#FF8A70"
+    guide: '#7CD0FF',
+    success: '#4DF0B2',
+    warn: '#FFD23F',
+    danger: '#FF8A70',
 };
-const GLYPHS = { guide: "pointer", success: "check", warn: "alert", danger: "stop" };
-const DASHES = { guide: null, success: null, warn: "12 8", danger: "2 9" };
-const NAMES = { guide: "Look here", success: "Done", warn: "Take care", danger: "Stop and check" };
-const PULSES = { guide: "infinite", success: 1, warn: 3, danger: "infinite" };
+const GLYPHS = { guide: 'pointer', success: 'check', warn: 'alert', danger: 'stop' };
+const DASHES = { guide: null, success: null, warn: '12 8', danger: '2 9' };
+const NAMES = { guide: 'Look here', success: 'Done', warn: 'Take care', danger: 'Stop and check' };
+const PULSES = { guide: 'infinite', success: 1, warn: 3, danger: 'infinite' };
 function hexToRgba(hex, alpha) {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${n >> 16 & 255}, ${n >> 8 & 255}, ${n & 255}, ${alpha})`;
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
 const round1 = (n) => Math.round(n * 10) / 10;
 function annotationStyle(settings, options = {}) {
-  const big = settings.bigAnnotations;
-  const hc = settings.highContrast;
-  const reduced = options.reducedMotion ?? false;
-  const s = big ? 1.6 : 1;
-  const px = (n) => round1(n * s);
-  const font = settings.dyslexiaFont ? DYSLEXIA_FONT : UI_FONT;
-  const cores = hc ? CORES_HC : CORES_NORMAL;
-  const tones = {};
-  for (const tone of ANNOTATION_TONES) {
-    const core2 = cores[tone];
-    tones[tone] = {
-      core: core2,
-      casing: INK,
-      halo: HALO,
-      onCore: INK,
-      glow: hexToRgba(core2, hc ? 0.7 : 0.55),
-      wash: hexToRgba(core2, hc ? 0.4 : 0.3),
-      dash: DASHES[tone],
-      glyph: GLYPHS[tone],
-      name: NAMES[tone],
-      pulseIterations: reduced ? 1 : PULSES[tone]
-    };
-  }
-  const core = px(hc ? 5 : 4);
-  const casingExtra = px(hc ? 2.5 : 2);
-  const haloExtra = px(hc ? 2.5 : 1.5);
-  return {
-    scale: s,
-    highContrast: hc,
-    reducedMotion: reduced,
-    tones,
-    stroke: {
-      core,
-      casing: round1(core + casingExtra * 2),
-      halo: round1(core + casingExtra * 2 + haloExtra * 2),
-      linecap: "round",
-      linejoin: "round"
-    },
-    glow: { blur: px(hc ? 10 : 16), opacity: hc ? 0.7 : 0.55 },
-    pulse: {
-      enabled: !reduced,
-      periodMs: 1700,
-      scaleFrom: 1,
-      scaleTo: big ? 1.18 : 1.12,
-      opacityFrom: 0.6,
-      opacityTo: 0,
-      easing: "cubic-bezier(0.22, 0.61, 0.36, 1)"
-    },
-    transition: {
-      enterMs: reduced ? 120 : 280,
-      exitMs: reduced ? 80 : 220,
-      easing: "cubic-bezier(0.22, 0.61, 0.36, 1)",
-      enterFromScale: reduced ? 1 : 1.12
-    },
-    ring: { pad: px(10), radius: px(14), minSize: px(44) },
-    badge: { diameter: px(38), fontSize: px(22), fontWeight: 700, fontFamily: font, offset: px(6) },
-    arrow: { headLength: px(24), headWidth: px(24), gap: px(14), curvature: 0.16, minLength: px(56) },
-    spotlight: {
-      dimOpacity: hc ? 0.72 : 0.55,
-      dimColor: "#05070D",
-      pad: px(14),
-      radius: px(16),
-      feather: hc ? 0 : px(14)
-    },
-    tick: { size: px(44), offset: px(10), drawMs: reduced ? 0 : 420, okTone: "success", notOkTone: "warn" },
-    highlightText: { pad: px(3), underlineWidth: px(4), radius: px(4), tone: "danger", noteMaxWidth: px(300) },
-    caption: {
-      fontSize: px(24),
-      lineHeight: 1.4,
-      fontFamily: font,
-      padding: { x: px(22), y: px(16) },
-      radius: px(16),
-      maxWidth: px(720),
-      background: "rgba(11, 18, 32, 0.94)",
-      color: "#FFFFFF",
-      speakerFontSize: px(16),
-      speakerColor: "#FFD9A0",
-      border: hc ? `${px(3)}px solid #FFFFFF` : `${px(1.5)}px solid rgba(255, 255, 255, 0.35)`,
-      bottomInset: px(48),
-      maxHeightFraction: 0.22
-    },
-    bubble: {
-      fontSize: px(22),
-      lineHeight: 1.4,
-      fontFamily: font,
-      padding: { x: px(18), y: px(12) },
-      radius: px(14),
-      maxWidth: px(340),
-      background: "#FFFFFF",
-      color: "#0B1220",
-      borderColor: INK,
-      borderWidth: px(hc ? 3.5 : 2.5),
-      tail: px(14),
-      shadow: "0 6px 22px rgba(5, 7, 13, 0.35)"
-    },
-    ghostCursor: {
-      size: px(30),
-      fill: cores.guide,
-      tag: "Showing you. I will not click.",
-      tagFontSize: px(16),
-      trail: { count: 5, spacingPx: px(14), opacity: 0.45 },
-      press: { radius: px(34), durationMs: reduced ? 0 : 700 },
-      flight: {
-        minMs: reduced ? 200 : 700,
-        maxMs: reduced ? 400 : 1900,
-        pxPerSec: 620,
-        arcHeightFraction: reduced ? 0 : 0.14,
-        easing: "cubic-bezier(0.45, 0, 0.25, 1)",
-        dwellMs: 600
-      }
-    },
-    levelChip: {
-      fontSize: px(22),
-      padding: { x: px(18), y: px(10) },
-      radius: px(999),
-      background: "rgba(11, 18, 32, 0.94)",
-      color: "#FFFFFF",
-      border: `${px(hc ? 3 : 1.5)}px solid ${hc ? "#FFFFFF" : "rgba(255, 255, 255, 0.4)"}`,
-      changeMs: reduced ? 0 : 900
+    const big = settings.bigAnnotations;
+    const hc = settings.highContrast;
+    const reduced = options.reducedMotion ?? false;
+    const s = big ? 1.6 : 1;
+    const px = (n) => round1(n * s);
+    const font = settings.dyslexiaFont ? DYSLEXIA_FONT : UI_FONT;
+    const cores = hc ? CORES_HC : CORES_NORMAL;
+    const tones = {};
+    for (const tone of ANNOTATION_TONES) {
+        const core = cores[tone];
+        tones[tone] = {
+            core,
+            casing: INK,
+            halo: HALO,
+            onCore: INK,
+            glow: hexToRgba(core, hc ? 0.7 : 0.55),
+            wash: hexToRgba(core, hc ? 0.4 : 0.3),
+            dash: DASHES[tone],
+            glyph: GLYPHS[tone],
+            name: NAMES[tone],
+            pulseIterations: reduced ? 1 : PULSES[tone],
+        };
     }
-  };
+    const core = px(hc ? 5 : 4);
+    const casingExtra = px(hc ? 2.5 : 2);
+    const haloExtra = px(hc ? 2.5 : 1.5);
+    return {
+        scale: s,
+        highContrast: hc,
+        reducedMotion: reduced,
+        tones,
+        stroke: {
+            core,
+            casing: round1(core + casingExtra * 2),
+            halo: round1(core + casingExtra * 2 + haloExtra * 2),
+            linecap: 'round',
+            linejoin: 'round',
+        },
+        glow: { blur: px(hc ? 10 : 16), opacity: hc ? 0.7 : 0.55 },
+        pulse: {
+            enabled: !reduced,
+            periodMs: 1700,
+            scaleFrom: 1,
+            scaleTo: big ? 1.18 : 1.12,
+            opacityFrom: 0.6,
+            opacityTo: 0,
+            easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+        },
+        transition: {
+            enterMs: reduced ? 120 : 280,
+            exitMs: reduced ? 80 : 220,
+            easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
+            enterFromScale: reduced ? 1 : 1.12,
+        },
+        ring: { pad: px(10), radius: px(14), minSize: px(44) },
+        badge: { diameter: px(38), fontSize: px(22), fontWeight: 700, fontFamily: font, offset: px(6) },
+        arrow: { headLength: px(24), headWidth: px(24), gap: px(14), curvature: 0.16, minLength: px(56) },
+        spotlight: {
+            dimOpacity: hc ? 0.72 : 0.55,
+            dimColor: '#05070D',
+            pad: px(14),
+            radius: px(16),
+            feather: hc ? 0 : px(14),
+        },
+        tick: { size: px(44), offset: px(10), drawMs: reduced ? 0 : 420, okTone: 'success', notOkTone: 'warn' },
+        highlightText: { pad: px(3), underlineWidth: px(4), radius: px(4), tone: 'danger', noteMaxWidth: px(300) },
+        caption: {
+            fontSize: px(24),
+            lineHeight: 1.4,
+            fontFamily: font,
+            padding: { x: px(22), y: px(16) },
+            radius: px(16),
+            maxWidth: px(720),
+            background: 'rgba(11, 18, 32, 0.94)',
+            color: '#FFFFFF',
+            speakerFontSize: px(16),
+            speakerColor: '#FFD9A0',
+            border: hc ? `${px(3)}px solid #FFFFFF` : `${px(1.5)}px solid rgba(255, 255, 255, 0.35)`,
+            bottomInset: px(48),
+            maxHeightFraction: 0.22,
+        },
+        bubble: {
+            fontSize: px(22),
+            lineHeight: 1.4,
+            fontFamily: font,
+            padding: { x: px(18), y: px(12) },
+            radius: px(14),
+            maxWidth: px(340),
+            background: '#FFFFFF',
+            color: '#0B1220',
+            borderColor: INK,
+            borderWidth: px(hc ? 3.5 : 2.5),
+            tail: px(14),
+            shadow: '0 6px 22px rgba(5, 7, 13, 0.35)',
+        },
+        ghostCursor: {
+            size: px(30),
+            fill: cores.guide,
+            tag: 'Showing you. I will not click.',
+            tagFontSize: px(16),
+            trail: { count: 5, spacingPx: px(14), opacity: 0.45 },
+            press: { radius: px(34), durationMs: reduced ? 0 : 700 },
+            flight: {
+                minMs: reduced ? 200 : 700,
+                maxMs: reduced ? 400 : 1900,
+                pxPerSec: 620,
+                arcHeightFraction: reduced ? 0 : 0.14,
+                easing: 'cubic-bezier(0.45, 0, 0.25, 1)',
+                dwellMs: 600,
+            },
+        },
+        levelChip: {
+            fontSize: px(22),
+            padding: { x: px(18), y: px(10) },
+            radius: px(999),
+            background: 'rgba(11, 18, 32, 0.94)',
+            color: '#FFFFFF',
+            border: `${px(hc ? 3 : 1.5)}px solid ${hc ? '#FFFFFF' : 'rgba(255, 255, 255, 0.4)'}`,
+            changeMs: reduced ? 0 : 900,
+        },
+    };
 }
+/**
+ * Stacked stroke layers for a line of `tone`, painted bottom to top: halo, casing, core.
+ * `widthScale` lets thinner parts (arrow head outline, badge rim) reuse the same recipe.
+ */
 function strokeLayers(style, tone, widthScale = 1) {
-  const t = style.tones[tone];
-  return [
-    { color: t.halo, width: round1(style.stroke.halo * widthScale), opacity: 0.92 },
-    { color: t.casing, width: round1(style.stroke.casing * widthScale), opacity: 1 },
-    { color: t.core, width: round1(style.stroke.core * widthScale), opacity: 1 }
-  ];
+    const t = style.tones[tone];
+    return [
+        { color: t.halo, width: round1(style.stroke.halo * widthScale), opacity: 0.92 },
+        { color: t.casing, width: round1(style.stroke.casing * widthScale), opacity: 1 },
+        { color: t.core, width: round1(style.stroke.core * widthScale), opacity: 1 },
+    ];
 }
 const DEFAULT_ANNOTATION_STYLE = annotationStyle({ bigAnnotations: false, highContrast: false });
-{
-  ANNOTATION_TONES,
-  DEFAULT_ANNOTATION_STYLE,
-  annotationStyle,
-  strokeLayers
-};
 
 /* Interactive preview. Globals annotationStyle, strokeLayers, LEVEL_NAMES, LEVEL_BLURBS, LEVEL_SUPPORT come from
    the real design modules (build.mjs inlines them), so this page cannot drift from the OVERLAY contract. */
@@ -2570,7 +2609,7 @@ function LevelChip(opts = {}) {
   const bars = h('div', { class: 'al-level__bars', 'aria-hidden': 'true' }, [1, 2, 3, 4].map(() => h('span', { class: 'al-level__bar' })));
   const kicker = h('span', { class: 'al-level__kicker' });
   const name = h('span', { class: 'al-level__name' });
-  const lock = h('span', { class: 'al-level__lock', hidden: true }, icon('lock'), 'Locked');
+  const lock = h('span', { class: 'al-level__lock', hidden: true }, icon('lock'), h('span', { class: 'al-level__locktext' }, 'Locked'));
   const delta = h('span', { class: 'al-level__delta', 'aria-hidden': 'true' });
   const live = h('span', { class: 'al-sr', 'aria-live': 'polite' });
   const root = h('div', { class: 'al-level' + (variant === 'compact' ? ' al-level--compact' : '') + (variant === 'hero' ? ' al-level--hero' : ''), role: 'group' },

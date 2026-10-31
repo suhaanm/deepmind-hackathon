@@ -18,7 +18,7 @@ export function Backdrop({ mode }: { mode: 'light' | 'dark' }): ReactElement {
   )
   return (
     <div style={{ position: 'absolute', inset: 0, background: c.wall, fontFamily: 'system-ui, sans-serif', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: 33, background: c.menu, color: c.ink, fontSize: 14, display: 'flex', alignItems: 'center', gap: 18, padding: '0 14px' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, right: 0, height: 33, zIndex: 0, background: c.menu, color: c.ink, fontSize: 14, display: 'flex', alignItems: 'center', gap: 18, padding: '0 14px' }}>
         <b>Files</b>
         <span>Edit</span>
         <span>View</span>

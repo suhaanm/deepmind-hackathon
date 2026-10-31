@@ -20,11 +20,13 @@ export interface SceneProps {
   speakerNames?: Partial<Record<CaptionSpeaker, string>>
   // Harness only: freeze ghost-cursor animations at this many ms.
   freezeGhostMs?: number | null
+  // Harness stills render bubbles fully typed.
+  typeBubbles?: boolean
 }
 
 const RANK: Record<string, number> = { spotlight: 0, highlightText: 1, ring: 2, arrow: 3, tick: 4, badge: 5, ghostCursor: 6, bubble: 7 }
 
-export function OverlayScene({ state, viewport, style, captionsEnabled, speakerNames = {}, freezeGhostMs = null }: SceneProps): ReactElement {
+export function OverlayScene({ state, viewport, style, captionsEnabled, speakerNames = {}, freezeGhostMs = null, typeBubbles = true }: SceneProps): ReactElement {
   const [sizes, setSizes] = useState<Record<string, Size>>({})
   const onSize = useCallback((id: string, size: Size) => {
     setSizes((prev) => {
@@ -50,7 +52,7 @@ export function OverlayScene({ state, viewport, style, captionsEnabled, speakerN
     <div className="ov-root" style={{ width: viewport.width, height: viewport.height }}>
       <style>{css}</style>
       <svg className="ov-svg" width={viewport.width} height={viewport.height} viewBox={`0 0 ${viewport.width} ${viewport.height}`}>
-        <Defs style={style} viewport={viewport} />
+        <Defs style={style} />
         {entries.map((e) => {
           const a = e.annotation
           const exiting = e.exitingAt !== null
@@ -110,7 +112,7 @@ export function OverlayScene({ state, viewport, style, captionsEnabled, speakerN
         if (a.kind === 'bubble') {
           const key = labelKey(a.id, 'bubble')
           const placed = plan.labels.get(key)
-          return placed ? <BubbleView key={key} id={key} text={a.text} anchor={normToPx(a.at, viewport)} style={style} placed={placed} exiting={exiting} onSize={onSize} /> : null
+          return placed ? <BubbleView key={key} id={key} typed={typeBubbles} text={a.text} anchor={normToPx(a.at, viewport)} style={style} placed={placed} exiting={exiting} onSize={onSize} /> : null
         }
         return null
       })}

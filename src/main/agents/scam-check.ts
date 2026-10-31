@@ -1,15 +1,19 @@
 import { NormBoxSchema } from '../../shared/protocol'
 import type { Annotation, AnnotationTone, GroundResult, NormBox, ScamReport, Shot } from '../../shared/protocol'
-import { AgentUserError } from './errors'
+import { AgentUserError, logAgentError } from './errors'
 import { defineAgent } from './ports'
 import type { AgentOutcome, ScamPorts } from './ports'
-import { cleanText, findInjectionPhrases, inlineSafe, INJECTION_WHY, plainSentences } from './text-safety'
+import { cleanText, findInjectionPhrases, inlineSafe, INJECTION_WHY, plainSentences, splitSentences } from './text-safety'
 
-export const SCAM_TIMEOUT_MS = 45_000
+// Covers extract (~4s) + the multi-agent analysis (p95 ~35-40s) + grounding with retries (~8s).
+export const SCAM_TIMEOUT_MS = 60_000
 export const HIGHLIGHT_TTL_MS = 25_000
 export const MAX_FLAGS = 5
 const MAX_MESSAGE_CHARS = 6000
 const FRESH_SHOT_MS = 6000
+const GROUND_CONCURRENCY = 5
+const BUBBLE_MAX_CHARS = 230
+const MIN_WORDS_TO_SPLIT = 5
 
 export const HUMAN_CHECK_LINE =
   'Before you do anything, ring the number on the back of your bank card, or ask Age UK or someone you trust.'
@@ -88,27 +92,79 @@ function validBox(result: GroundResult): NormBox | undefined {
   return xmax - xmin >= 4 && ymax - ymin >= 3 ? parsed.data : undefined
 }
 
+/** Whole sentences only, so the bubble never ends mid-thought. */
+function fitSentences(sentences: string[], maxChars: number): string {
+  const kept: string[] = []
+  for (const sentence of sentences) {
+    const next = [...kept, sentence].join(' ')
+    if (next.length > maxChars && kept.length > 0) break
+    kept.push(sentence)
+  }
+  return kept.join(' ')
+}
+
 export function buildHighlights(
   agentId: string,
   report: ScamReport,
-  located: (NormBox | undefined)[],
+  located: NormBox[][],
   ttlMs = HIGHLIGHT_TTL_MS,
 ): Annotation[] {
   const tone = toneFor(report.verdict)
   const annotations: Annotation[] = []
-  located.forEach((box, i) => {
+  located.forEach((boxes, i) => {
     const flag = report.redFlags[i]
-    if (!box || !flag) return
-    annotations.push({ id: `${agentId}-flag-${i}`, kind: 'highlightText', tone, ttlMs, boxes: [box], note: inlineSafe(flag.why, 90) })
+    const [first, ...rest] = boxes
+    if (!first || !flag) return
+    annotations.push({ id: `${agentId}-flag-${i}`, kind: 'highlightText', tone, ttlMs, boxes: [first, ...rest], note: inlineSafe(flag.why, 90) })
   })
-  const boxes = located.filter((b): b is NormBox => b !== undefined)
-  const lowest = boxes.reduce<NormBox | undefined>((acc, b) => (!acc || b.ymax > acc.ymax ? b : acc), undefined)
+  const lowest = located.flat().reduce<NormBox | undefined>((acc, b) => (!acc || b.ymax > acc.ymax ? b : acc), undefined)
   const at = lowest
     ? { x: clamp((lowest.xmin + lowest.xmax) / 2, 160, 840), y: clamp(lowest.ymax + 30, 70, 930) }
     : { x: 500, y: 140 }
-  const bubbleText = inlineSafe(`${VERDICT_LINE[report.verdict]} ${report.advice.join(' ')}`, 220)
-  annotations.push({ id: `${agentId}-advice`, kind: 'bubble', tone, ttlMs, at, text: bubbleText })
+  const text = fitSentences([VERDICT_LINE[report.verdict], ...report.advice.slice(0, 2).flatMap((a) => splitSentences(a))], BUBBLE_MAX_CHARS)
+  annotations.push({ id: `${agentId}-advice`, kind: 'bubble', tone, ttlMs, at, text })
   return annotations
+}
+
+function createLimiter(max: number): <T>(work: () => Promise<T>) => Promise<T> {
+  let active = 0
+  const waiting: (() => void)[] = []
+  return async (work) => {
+    while (active >= max) await new Promise<void>((resolve) => waiting.push(resolve))
+    active += 1
+    try {
+      return await work()
+    } finally {
+      active -= 1
+      waiting.shift()?.()
+    }
+  }
+}
+
+type Located = NormBox | 'missing' | 'error'
+
+async function groundOnce(ports: ScamPorts, phrase: string, shot: Shot, limit: ReturnType<typeof createLimiter>): Promise<Located> {
+  try {
+    const result = await limit(() => ports.ground(`the text "${phrase.replace(/"/g, "'")}"`, shot))
+    return validBox(result) ?? 'missing'
+  } catch (err) {
+    logAgentError('scam_check.ground', err)
+    return 'error'
+  }
+}
+
+/**
+ * One grounding call per phrase. A phrase that wraps onto a second line is reported as "not present" by the grounder,
+ * so a long miss is retried as two halves; highlightText takes several boxes for exactly this case.
+ */
+async function locatePhrase(ports: ScamPorts, phrase: string, shot: Shot, limit: ReturnType<typeof createLimiter>): Promise<NormBox[]> {
+  const whole = await groundOnce(ports, phrase, shot, limit)
+  if (typeof whole === 'object') return [whole]
+  const words = phrase.split(/\s+/).filter(Boolean)
+  if (whole === 'error' || words.length < MIN_WORDS_TO_SPLIT) return []
+  const mid = Math.ceil(words.length / 2)
+  const halves = await Promise.all([words.slice(0, mid), words.slice(mid)].map((part) => groundOnce(ports, part.join(' '), shot, limit)))
+  return halves.filter((h): h is NormBox => typeof h === 'object')
 }
 
 async function readMessage(
@@ -117,6 +173,7 @@ async function readMessage(
 ): Promise<{ text: string; shot?: Shot }> {
   const given = payload.text ? cleanText(payload.text, MAX_MESSAGE_CHARS) : ''
   if (given) return { text: given }
+  ports.progress('Reading the message…')
   const shot = await ports.grabScreen()
   const text = await ports.extractMessage(shot).then((t) => cleanText(t, MAX_MESSAGE_CHARS), () => '')
   return { text, shot }
@@ -128,6 +185,12 @@ export const scamCheckAgent = defineAgent<ScamPorts>({
   title: () => 'Checking this message',
 
   createPorts(deps, scope) {
+    // The analyst's parallel specialists announce themselves in a burst, so stages accumulate into a short checklist.
+    const stages: string[] = []
+    const reportStage = (message: string): void => {
+      if (!stages.includes(message)) stages.push(message)
+      scope.progress(stages.slice(-3).join(' · '))
+    }
     const guard = <T>(work: Promise<T>): Promise<T> =>
       work.then((value) => {
         scope.signal.throwIfAborted()
@@ -137,8 +200,10 @@ export const scamCheckAgent = defineAgent<ScamPorts>({
       settings: () => deps.settings(),
       grabScreen: () => guard(deps.capture.grab('ground')),
       extractMessage: (shot) => guard(deps.model.extractMessage({ shot, signal: scope.signal })),
-      analyze: (req) => guard(deps.scam.analyze(req)),
-      ground: (target, shot) => guard(deps.grounder.ground({ target, shot })),
+      analyze: (req) => guard(deps.scam.analyze(req, { onProgress: reportStage })),
+      progress: reportStage,
+      // precise = flash-first grounding, required for the scam path (phrases sit inside dense text).
+      ground: (target, shot) => guard(deps.grounder.ground({ target, shot, precise: true })),
       showHighlights: (annotations, ttlMs) => scope.highlights.show(annotations, ttlMs),
       now: scope.now,
     }
@@ -154,6 +219,7 @@ export const scamCheckAgent = defineAgent<ScamPorts>({
       throw new AgentUserError('I could not find a message to check. Please open it on your screen and ask me again.')
     }
     const url = payload.url
+    ports.progress('Checking the message…')
     const raw = await ports.analyze(
       message.text ? { text: message.text, ...(message.shot ? { shot: message.shot } : {}), ...(url ? { url } : {}) } : { shot: message.shot, ...(url ? { url } : {}) },
     )
@@ -162,25 +228,18 @@ export const scamCheckAgent = defineAgent<ScamPorts>({
     // The analysis can take seconds; the user may have scrolled, so ground on a fresh shot.
     const groundShot =
       message.shot && ports.now() - message.shot.takenAt < FRESH_SHOT_MS ? message.shot : await ports.grabScreen()
-    const results = await Promise.all(
-      report.redFlags.slice(0, MAX_FLAGS).map((flag) =>
-        ports.ground(`the text "${flag.phrase.replace(/"/g, "'")}"`, groundShot).then(
-          (r) => r,
-          () => undefined,
-        ),
-      ),
-    )
-    const located = results.map((r) => (r ? validBox(r) : undefined))
+    ports.progress('Marking the worrying parts…')
+    const limit = createLimiter(GROUND_CONCURRENCY)
+    const located = await Promise.all(report.redFlags.slice(0, MAX_FLAGS).map((flag) => locatePhrase(ports, flag.phrase, groundShot, limit)))
     ports.showHighlights(buildHighlights(agentId, report, located), HIGHLIGHT_TTL_MS)
 
     const summary = buildSummary(report)
-    const marked = located.filter(Boolean).length
+    const marked = located.filter((boxes) => boxes.length > 0).length
+    const onScreen = marked === 0 ? '' : ` ${marked} worrying ${marked === 1 ? 'part is' : 'parts are'} marked on the screen.`
     return {
       summary,
       result: { kind: 'scam_check', report },
-      tell:
-        `${summary} ${marked} worrying ${marked === 1 ? 'part is' : 'parts are'} marked on the screen. ` +
-        'Say this in your own words in two short sentences. Do not say anything that sounds reassuring about the message.',
+      tell: `${summary}${onScreen} Say it in two short sentences, in your own words, without reassuring them about the message.`,
     }
   },
 })

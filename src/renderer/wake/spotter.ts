@@ -38,6 +38,7 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
   const cooldownMs = options.cooldownMs ?? 4000
   const handoffMs = options.handoffMs ?? 6000
   const maxSessionMs = options.maxSessionMs ?? 540_000
+  const stableInterimMs = options.stableInterimMs ?? 1200
   const ring = new PrerollBuffer(options.prerollMs ?? 3000)
   const settings: WakeSettings = { wakeEnabled: true, pushToTalkOnly: false, micMuted: false, ...options.settings }
   const manual = new Set<WakePauseReason>()
@@ -65,6 +66,7 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
   let streamStartedAt = 0
   let lastWakeAt = -Infinity
   let lastTranscriptAt = 0
+  let stable: { key: string; since: number } | null = null
   let retryTimer: ReturnType<typeof setTimeout> | null = null
   let rotateTimer: ReturnType<typeof setTimeout> | null = null
   let wakeTimer: ReturnType<typeof setTimeout> | null = null
@@ -274,11 +276,18 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
   }
 
   function handleTranscript(text: string, final: boolean): void {
-    lastTranscriptAt = Date.now()
-    options.onDebug?.(text, final)
-    const m = matcher.match(text, { final })
-    if (!m) return
     const now = Date.now()
+    lastTranscriptAt = now
+    options.onDebug?.(text, final)
+    // The server keeps repeating an unchanged interim and can be slow to finalise; an interim that has stood
+    // unchanged long enough is the end of an utterance, which lets a bare "Amelia." (ASR dropped "hey") count.
+    const key = normalize(text)
+    let settled = final
+    if (final) stable = null
+    else if (stable?.key === key) settled = now - stable.since >= stableInterimMs
+    else stable = { key, since: now }
+    const m = matcher.match(text, { final: settled })
+    if (!m) return
     if (now - lastWakeAt < cooldownMs) return
     lastWakeAt = now
     // Stop streaming to the cloud immediately; keep capturing locally for the Live handoff pre-roll.
@@ -290,6 +299,7 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
       manual.delete('live')
       reconcile()
     }, WAKE_ORPHAN_MS)
+    stable = null
     const atMs = now - streamStartedAt
     reconcile()
     options.onWake({ personaId: m.personaId as Id, source: 'wake', score: m.score, heard: m.heard, trailing: m.trailing, atMs })
