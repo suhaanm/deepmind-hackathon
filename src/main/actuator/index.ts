@@ -39,6 +39,8 @@ export interface Actuator {
   typeText(text: string): Promise<ActResult>
   // Allowlist only: return, tab, escape, space, arrows, cmd+l/t/w/v/c/a/f.
   pressKeys(combo: string): Promise<ActResult>
+  // Fallback for typeText: puts the text on the clipboard, presses Cmd+V, then restores the previous clipboard text.
+  pasteText?(text: string): Promise<ActResult>
   // Scrolls the window under `p`; dy > 0 reads further down, dy < 0 back up (lines, 1-50).
   scroll(p: NormPoint, dy: number): Promise<ActResult>
 }
@@ -53,6 +55,9 @@ export interface ActuatorDeps {
   osascript?: (args: string[]) => Promise<void>
   // Runs `open -a <name>`; rejects on failure.
   openAppProcess?: (name: string) => Promise<void>
+  // Clipboard text access for pasteText (pbpaste / pbcopy); tests inject fakes.
+  readClipboard?: () => Promise<string>
+  writeClipboard?: (text: string) => Promise<void>
   openExternal?: (url: string) => Promise<void>
   showItemInFolder?: (path: string) => void
   exists?: (path: string) => boolean
@@ -96,6 +101,18 @@ const runOpenApp = (name: string): Promise<void> =>
     execFile('/usr/bin/open', ['-a', name], { timeout: 8000 }, (err, _stdout, stderr) => (err ? reject(new Error(stderr.trim() || err.message)) : resolve()))
   })
 
+const runClipboardRead = (): Promise<string> =>
+  new Promise((resolve) => {
+    execFile('/usr/bin/pbpaste', [], { timeout: 3000, maxBuffer: 1 << 20 }, (err, stdout) => resolve(err ? '' : String(stdout)))
+  })
+
+// The text goes in on stdin: it is data, never part of a command line.
+const runClipboardWrite = (text: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const child = execFile('/usr/bin/pbcopy', [], { timeout: 3000 }, (err) => (err ? reject(new Error(err.message)) : resolve()))
+    child.stdin?.end(text)
+  })
+
 let electronApi: Promise<typeof import('electron')> | null = null
 const electron = (): Promise<typeof import('electron')> => (electronApi ??= import('electron'))
 
@@ -107,6 +124,8 @@ export function createActuator(deps: ActuatorDeps = {}): Actuator {
   const platform = deps.platform ?? process.platform
   const osascript = deps.osascript ?? runOsascript
   const openAppProcess = deps.openAppProcess ?? runOpenApp
+  const readClipboard = deps.readClipboard ?? runClipboardRead
+  const writeClipboard = deps.writeClipboard ?? runClipboardWrite
   const exists = deps.exists ?? existsSync
   const home = deps.homedir ?? os.homedir()
   let trusted = deps.isTrusted
@@ -201,6 +220,29 @@ export function createActuator(deps: ActuatorDeps = {}): Actuator {
       if (!c.ok) return blocked(c.detail)
       // The log line carries the length only: typed text can be personal.
       return act(`typeText (${c.value.length} characters)`, () => osascript(typeScript(c.value)), true)
+    },
+
+    async pasteText(text) {
+      const c = checkTypedText(text)
+      if (!c.ok) return blocked(c.detail)
+      const keys = checkKeyCombo('cmd+v')
+      if (!keys.ok) return blocked(keys.detail)
+      const statement = keys.value.statement
+      return act(
+        `pasteText (${c.value.length} characters)`,
+        async () => {
+          const previous = await readClipboard()
+          await writeClipboard(c.value)
+          try {
+            await osascript(['-e', statement])
+            // Give the target app a moment to read the clipboard before it is put back.
+            await new Promise((r) => setTimeout(r, 250))
+          } finally {
+            await writeClipboard(previous).catch(() => undefined)
+          }
+        },
+        true,
+      )
     },
 
     async pressKeys(combo) {

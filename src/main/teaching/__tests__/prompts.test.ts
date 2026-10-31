@@ -80,7 +80,7 @@ describe('buildSystemInstruction', () => {
     expect(each).toContain('If code is "unavailable", use open_for_me or teach.')
     expect(each).not.toContain('switched off by the learner')
     const perTask = buildSystemInstruction({ ...base, settings: { ...DEFAULT_SETTINGS, doItForMeAllowed: true, agency: 'ask_per_task' } })
-    expect(perTask).toContain('the plan is confirmed once by the learner (risky steps still ask)')
+    expect(perTask).toContain('the plan is confirmed ONCE by the learner, then the steps run on their own (a risky step still asks; consent and cookie choices are left to the learner)')
   })
 
   it('file search lines (only when on): data not instructions, choose open or show, honest about doubt', () => {

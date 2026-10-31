@@ -6,6 +6,7 @@ import { createActForMe, type ActOptions } from './act-for-me'
 import { createAxResolver } from './ax-resolver'
 import { Situation, type AgencyDeps } from './common'
 import { createOpenForMe, type DoneForMeSink, type OpenArgs } from './open-for-me'
+import { readFrontApp } from './scope'
 import { ActionLimiter } from './policy'
 
 export { lastAuditLine, appendAgencyAudit } from './audit'
@@ -37,6 +38,8 @@ export function createAgency(deps: AgencyDeps & { act?: Partial<ActOptions> }): 
     cursor: cursorFromElectron,
     // Accessibility-first targets for native apps (exact element frames); off under unit tests, ALONGSIDE_AX_RESOLVER=0 disables it.
     ...(process.env.VITEST ? {} : { resolveAx: createAxResolver({ log: deps.ctx.log }) }),
+    // Scope: the frontmost app is read (name only, via lsappinfo) before every action; ALONGSIDE_AGENCY_SCOPE=0 disables it.
+    ...(process.env.VITEST || process.env.ALONGSIDE_AGENCY_SCOPE === '0' ? {} : { frontApp: readFrontApp }),
     ...deps.act,
   })
   return {

@@ -17,6 +17,7 @@ export default defineConfig({
         input: {
           dock: resolve(__dirname, 'src/renderer/dock/index.html'),
           overlay: resolve(__dirname, 'src/renderer/overlay/index.html'),
+          toast: resolve(__dirname, 'src/renderer/toast/index.html'),
         },
       },
     },

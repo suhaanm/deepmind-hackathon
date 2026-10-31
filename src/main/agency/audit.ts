@@ -19,6 +19,8 @@ export interface AgencyAuditEntry {
   dryRun?: boolean
   // Set only when no confirmation click was needed because the owner had opted in and was away.
   approval?: 'auto-away'
+  // The frontmost application (name only) when the entry was written: shows the task stayed in scope.
+  app?: string
 }
 
 const SENSITIVE = /\b(password|passcode|token|api[_ -]?key|secret|private[_ -]?key|seed phrase|recovery phrase)\b|\bsk-[a-z0-9_-]{6,}|\bxox[baprs]-[a-z0-9-]+|\b(?:\d[ -]?){13,19}\b/i
@@ -45,6 +47,7 @@ export function auditLine(entry: AgencyAuditEntry, now: () => number = Date.now)
     ...(entry.step !== undefined ? { step: entry.step } : {}),
     ...(entry.dryRun ? { dryRun: true } : {}),
     ...(entry.approval ? { approval: entry.approval } : {}),
+    ...(entry.app ? { app: redactLabel(entry.app, 40) } : {}),
   })
 }
 

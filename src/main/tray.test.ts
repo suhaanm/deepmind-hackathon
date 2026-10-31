@@ -55,6 +55,8 @@ import { SettingsStore } from './settings'
 import { StateStore } from './state'
 import { buildMenuEntries, describeStatus, iconKind, registerTray } from './tray'
 import type { TrayModel } from './tray'
+import { trayTitle } from './panel-rules'
+import type { TrayStateInput } from './panel-rules'
 
 const base: TrayModel = { phase: 'asleep', micMuted: false, persona: null, dockVisible: true, showtimeRunning: false }
 const labels = (m: Partial<TrayModel> = {}) => buildMenuEntries({ ...base, ...m }).filter((e) => !e.separator).map((e) => e.label)
@@ -65,12 +67,12 @@ describe('menu content', () => {
     const all = labels()
     expect(all).toEqual([
       'Asleep',
+      'Show panel',
       'Talk to Marcus',
       'Talk to Amelia',
       'Type instead',
       'Mute microphone',
       'Stop',
-      'Hide panel',
       'Run the demo walkthrough',
       'Set up again…',
       'Permissions…',
@@ -107,7 +109,8 @@ describe('menu content', () => {
 
   it('flips the mute, panel and demo labels with state', () => {
     expect(byId({ micMuted: true }, 'mute')?.label).toBe('Unmute microphone')
-    expect(byId({ dockVisible: false }, 'panel')?.label).toBe('Show panel')
+    expect(byId({ dockVisible: false }, 'panel')).toMatchObject({ label: 'Show panel', checked: false })
+    expect(byId({ dockVisible: true }, 'panel')).toMatchObject({ label: 'Show panel', checked: true })
     expect(byId({ showtimeRunning: true }, 'demo')?.label).toBe('Stop the demo walkthrough')
   })
 
@@ -125,6 +128,7 @@ function setup(opts: { showMenuBarIcon?: boolean; iconDir?: string; dockVisible?
   mocks.FakeTray.instances.length = 0
   const bus = new Bus()
   const settings = new SettingsStore(null)
+  settings.patch({ onboardingDone: true }) // setup done: the panel may be hidden
   if (opts.showMenuBarIcon === false) settings.patch({ showMenuBarIcon: false })
   const state = new StateStore(settings.get())
   let visible = opts.dockVisible ?? true
@@ -212,14 +216,15 @@ describe('tray lifecycle', () => {
 })
 
 describe('click handlers', () => {
-  it('left click shows an hidden dock expanded, otherwise toggles', () => {
-    const { tray, windows } = setup({ dockVisible: false })
+  it('left click shows a hidden panel (and remembers it), a second click hides it again', () => {
+    const { tray, windows, settings } = setup({ dockVisible: false })
     tray().handlers.click()
     expect(windows.showDock).toHaveBeenCalledTimes(1)
     expect(windows.sendDock).toHaveBeenLastCalledWith('shell:command', { type: 'expand' })
+    expect(settings.get().showDock).toBe(true)
     tray().handlers.click()
-    expect(windows.showDock).toHaveBeenCalledTimes(1)
-    expect(windows.sendDock).toHaveBeenLastCalledWith('shell:command', { type: 'toggle' })
+    expect(windows.hideDock).toHaveBeenCalledTimes(1)
+    expect(settings.get().showDock).toBe(false)
   })
 
   it('right click pops up a fresh menu built from the current state', () => {
@@ -285,13 +290,48 @@ describe('menu actions', () => {
     expect(stop).toHaveBeenCalledWith('stop')
   })
 
-  it('Show/Hide panel toggles the dock window', () => {
-    const { shell, windows } = setup()
+  it('the Show panel checkbox toggles the dock window and persists showDock', () => {
+    const { shell, windows, settings } = setup()
     shell.activate('panel')
     expect(windows.hideDock).toHaveBeenCalledTimes(1)
+    expect(settings.get().showDock).toBe(false)
     shell.activate('panel')
     expect(windows.showDock).toHaveBeenCalledTimes(1)
     expect(windows.sendDock).toHaveBeenLastCalledWith('shell:command', { type: 'expand' })
+    expect(settings.get().showDock).toBe(true)
+  })
+
+  it('the panel stays up while setup is unfinished, even when asked to hide', () => {
+    const { shell, windows, settings } = setup()
+    settings.patch({ onboardingDone: false })
+    shell.activate('panel') // visible -> hide requested
+    expect(windows.hideDock).not.toHaveBeenCalled()
+  })
+
+  it('the Settings switch (showDock) shows and hides the panel like the checkbox', () => {
+    const { windows, settings } = setup({ dockVisible: false })
+    settings.patch({ showDock: true })
+    expect(windows.showDock).toHaveBeenCalledTimes(1)
+    settings.patch({ showDock: false })
+    expect(windows.hideDock).toHaveBeenCalledTimes(1)
+  })
+
+  it('Type instead from a hidden panel shows it, and the panel hides again when that session ends', () => {
+    const { shell, windows, state } = setup({ dockVisible: false })
+    shell.activate('type')
+    expect(windows.showDock).toHaveBeenCalledTimes(1)
+    state.patch({ phase: 'live' })
+    state.patch({ phase: 'listening_for_name' })
+    expect(windows.hideDock).toHaveBeenCalledTimes(1)
+  })
+
+  it('Type instead leaves a panel the user keeps open alone', () => {
+    const { shell, windows, state, settings } = setup({ dockVisible: true })
+    settings.patch({ showDock: true })
+    shell.activate('type')
+    state.patch({ phase: 'live' })
+    state.patch({ phase: 'listening_for_name' })
+    expect(windows.hideDock).not.toHaveBeenCalled()
   })
 
   it('Run the demo walkthrough emits showtime:request from the tray', () => {
@@ -336,5 +376,49 @@ describe('menu actions', () => {
     expect(setup().shell.info().menu.find((e) => e.id === 'talk:marcus')?.accelerator).toBe('CommandOrControl+Alt+Shift+Space')
     mocks.registered.add('CommandOrControl+Alt+Space')
     mocks.registered.add('CommandOrControl+Alt+M')
+  })
+})
+
+describe('menu bar state', () => {
+  beforeEach(() => mocks.FakeTray.instances.splice(0))
+
+  it('maps every state to a short sentence-case word (asleep shows the icon alone)', () => {
+    const t = (m: Partial<TrayStateInput>) => trayTitle({ phase: 'asleep', micMuted: false, ...m })
+    expect(t({})).toBe('')
+    expect(t({ phase: 'listening_for_name' })).toBe('Listening')
+    expect(t({ phase: 'connecting' })).toBe('Connecting')
+    expect(t({ phase: 'live' })).toBe('Live')
+    expect(t({ phase: 'thinking' })).toBe('Thinking')
+    expect(t({ phase: 'speaking' })).toBe('Speaking')
+    expect(t({ phase: 'live', micMuted: true })).toBe('Muted')
+    expect(t({ phase: 'live', agents: [{ status: 'running' }] })).toBe('Working…')
+    expect(t({ phase: 'live', agents: [{ status: 'done' }] })).toBe('Live')
+    expect(t({ phase: 'error', micMuted: true })).toBe('Problem')
+    for (const phase of ['asleep', 'listening_for_name', 'connecting', 'live', 'thinking', 'speaking', 'error'] as const) expect(t({ phase })).not.toMatch(/\p{Extended_Pictographic}/u)
+  })
+
+  it('sets the tray title and tooltip as state changes, including an agent working for the user', () => {
+    const { state, tray, shell } = setup()
+    state.patch({ phase: 'listening_for_name' })
+    expect(tray().title).toBe('Listening')
+    expect(shell.info().title).toBe('Listening')
+    state.patch({ phase: 'live', persona: 'marcus' })
+    expect(tray().title).toBe('Live')
+    state.patch({ agents: [{ id: 'a1', kind: 'act_for_me', title: 't', status: 'running', startedAt: 1 }] as never })
+    expect(tray().title).toBe('Working…')
+    expect(tray().tooltip).toBe('Alongside: Marcus is working for you')
+    state.patch({ agents: [] })
+    state.patch({ micMuted: true })
+    expect(tray().title).toBe('Muted')
+    state.patch({ micMuted: false, phase: 'error' })
+    expect(tray().title).toBe('Problem')
+    state.patch({ phase: 'asleep' })
+    expect(tray().title).toBe('')
+  })
+
+  it('reports the checkbox state and title in the debug info', () => {
+    const { shell } = setup({ dockVisible: false })
+    expect(shell.info().menu.find((e) => e.id === 'panel')).toMatchObject({ label: 'Show panel', checked: false })
+    expect(shell.info().panelVisible).toBe(false)
   })
 })

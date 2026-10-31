@@ -53,6 +53,11 @@ export async function openStageWindow(opts: { log: (msg: string) => void; indexH
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false },
   })
   win.setMenuBarVisibility(false)
+  // The practice desktop never opens windows or leaves the bundled page (local file navigation, such as its own pages, is allowed).
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith('file:')) event.preventDefault()
+  })
   // Below the dock ('floating') and the overlay ('screen-saver'), above ordinary windows.
   win.setAlwaysOnTop(true, 'floating', -1)
   const index = opts.indexHtml ?? path.join(app.getAppPath(), 'apps/demo-stage/index.html')

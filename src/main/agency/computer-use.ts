@@ -43,9 +43,10 @@ export const SYSTEM_INSTRUCTION = [
   'When the goal is complete, or cannot be done safely, reply with one short plain sentence and no action.',
 ].join('\n')
 
-export function buildUserText(goal: string, history: readonly string[]): string {
+export function buildUserText(goal: string, history: readonly string[], feedback?: string): string {
   const lines = [`GOAL (the only task, from the person): ${JSON.stringify(goal)}`, '']
   if (history.length) lines.push('Already done in this task (do not repeat):', ...history.map((h, i) => `${i + 1}. ${h}`), '')
+  if (feedback) lines.push(`FEEDBACK from the app (about your last proposal): ${feedback}`, '')
   lines.push('The attached image is the screen right now. Propose exactly ONE next action, or reply with one plain sentence and no action if the goal is complete or cannot be done safely.')
   return lines.join('\n')
 }
@@ -107,6 +108,8 @@ export interface ProposeRequest {
   shot: Shot
   timeoutMs: number
   model?: string
+  // Structured recovery note after a repeated or ineffective proposal (plain text from our own code, never from the screen).
+  feedback?: string
 }
 
 // Asks the model for the next action on a fresh screenshot. Never retries an action; a transport retry of THIS read-only
@@ -119,7 +122,7 @@ export async function proposeNext(deps: GeminiDeps, req: ProposeRequest): Promis
     retries: 1,
     params: {
       system_instruction: SYSTEM_INSTRUCTION,
-      input: [{ type: 'text', text: buildUserText(req.goal, req.history) }, imageInput(req.shot, 'high')],
+      input: [{ type: 'text', text: buildUserText(req.goal, req.history, req.feedback) }, imageInput(req.shot, 'high')],
       generation_config: { thinking_level: 'low' },
       tools: [{ type: 'computer_use', environment: 'desktop', enable_prompt_injection_detection: true, excluded_predefined_functions: [...EXCLUDED_FUNCTIONS] }],
     },

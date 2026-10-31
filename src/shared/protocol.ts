@@ -280,6 +280,9 @@ export interface CompanionState {
   lastError?: string
   // Set while ask_user_confirm waits; cleared only by a real click (IPC confirm:answer).
   pendingConfirm?: ConfirmRequest
+  // NOTIFY: set (by src/main/toast.ts) only while that pendingConfirm is really on screen in the top-right toast; the dock then
+  // shows no second prompt. expiresAt = when the confirm manager auto-declines (null: unknown, so no countdown).
+  toastConfirm?: { id: string; expiresAt: number | null }
   // FILES: indexing progress and counts for the "Files I can look at" section.
   files?: FilesStatus
 }

@@ -318,6 +318,38 @@ function probeChecks(p) {
   else add('Global hotkeys', h.failed.length ? 'warn' : 'ok', `start: ${h.start.join(', ')} | stop: ${h.stop.join(', ')}${h.failed.length ? ` | taken by another app: ${h.failed.join(', ')}` : ''}`, 'Some combos are taken; the others work. Write down which start combo you will use. Press it once in the room: macOS can still claim Cmd+Alt+Space for Finder search.')
 }
 
+// ---------- agency (do-it-for-me) ----------
+// Leftover headless Chrome processes (from tests or scripts) can answer `open https://...` and swallow the link: the page
+// opens in a browser nobody can see while open_for_me still reports success.
+function headlessChromeCount() {
+  const r = spawnSync('/usr/bin/pgrep', ['-fl', 'Google Chrome'], { encoding: 'utf8', timeout: 3000 })
+  return String(r.stdout || '').split('\n').filter((l) => /--headless/.test(l)).length
+}
+function agencyChecks(p) {
+  const n = process.platform === 'darwin' ? headlessChromeCount() : 0
+  if (n > 0) add('Headless Chrome processes', 'warn', `${n} headless Chrome process${n === 1 ? '' : 'es'} found`, `${n} headless Chrome processes may swallow links opened for you; quit them or use Safari.`)
+  let agency = 'ask_per_task (default)'
+  const dirs = [process.env.ALONGSIDE_USERDATA, join(homedir(), 'Library', 'Application Support', 'alongside'), join(homedir(), 'Library', 'Application Support', 'Alongside')].filter(Boolean)
+  for (const d of dirs) {
+    const f = join(d, 'settings.json')
+    if (!existsSync(f)) continue
+    try {
+      const j = JSON.parse(readFileSync(f, 'utf8'))
+      const chosen = j.agencyChosen === true
+      let level = typeof j.agency === 'string' ? j.agency : 'ask_per_task'
+      // Mirrors the app's load(): a profile that never chose 'off' / 'ask_each' runs as ask_per_task.
+      if (!chosen && (level === 'off' || level === 'ask_each')) level = 'ask_per_task'
+      agency = `${level}${chosen ? ' (chosen)' : ' (default)'}`
+    } catch {
+      // unreadable settings: report the default
+    }
+    break
+  }
+  const loop = process.env.ALONGSIDE_AGENCY_LOOP !== '0' ? 'on' : 'OFF (ALONGSIDE_AGENCY_LOOP=0)'
+  const ax = p && p.platform === 'darwin' ? (p.accessibilityTrusted ? 'trusted' : 'NOT trusted (it can only point, not click)') : 'n/a'
+  add('Agency (do-it-for-me)', ax.startsWith('NOT') || loop.startsWith('OFF') ? 'warn' : 'info', `setting: ${agency} | multi-step loop: ${loop} | Accessibility: ${ax}`, 'To let it click and type: System Settings > Privacy & Security > Accessibility: switch on the app named above, then fully quit and reopen it. Unset ALONGSIDE_AGENCY_LOOP to turn the loop on.')
+}
+
 // ---------- run ----------
 localChecks()
 const SKIPPED = ['Network latency to the Gemini API', 'Live voice smoke test', 'Wake-word token + stream']
@@ -329,7 +361,9 @@ if (key && (await modelsCheck())) {
   for (const name of SKIPPED) add(name, 'fail', key ? 'skipped: the key or the network failed above' : 'skipped: no API key', 'Fix the row above first, then re-run.')
   await Promise.all([stageCheck(), runningAppCheck()])
 }
-probeChecks(await probeP)
+const probeResult = await probeP
+probeChecks(probeResult)
+agencyChecks(probeResult)
 
 // ---------- report ----------
 const ORDER = ['.env with GEMINI_API_KEY', '.env is git-ignored', 'Gemini API key accepted (models.list)', 'Models the app uses are visible', 'Network latency to the Gemini API', 'Live voice smoke test', 'Wake-word token + stream']

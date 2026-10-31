@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { StateStore } from './state'
 
-const CONFIRM_TIMEOUT_MS = 120_000
+export const CONFIRM_TIMEOUT_MS = 120_000 // exported so the toast (NOTIFY) can show the same countdown
 
 // ask_user_confirm: approval can only ever arrive through answer(), which is wired to a real click in the dock.
 export class ConfirmBroker {

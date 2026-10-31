@@ -18,9 +18,10 @@ export const SettingsSchema = z.object({
   // Both OFF unless the user turns them on; "do it for me" additionally needs a real-click confirmation per action.
   doItForMeAllowed: z.boolean().default(true),
   // AGENCY: how much the assistant may DO for the learner. off = teach only; ask_each = a real-click confirmation before
-  // every action; ask_per_task = confirm the plan once, still confirm anything risky. Keep doItForMeAllowed = agency !== 'off'.
-  agency: z.enum(['off', 'ask_each', 'ask_per_task', 'autonomous']).default('ask_each'),
-  // true once the user picked a level themselves (dock Settings or onboarding); until then an old 'off' is migrated to ask_each.
+  // every action; ask_per_task (the default) = confirm the plan once, then the steps run; risky steps still ask.
+  // Keep doItForMeAllowed = agency !== 'off'.
+  agency: z.enum(['off', 'ask_each', 'ask_per_task', 'autonomous']).default('ask_per_task'),
+  // true once the user picked a level themselves (dock Settings or onboarding); until then a saved 'off' / 'ask_each' is migrated to ask_per_task.
   agencyChosen: z.boolean().default(false),
   // autonomous = no confirmation click while the user is away (no keyboard/mouse for awaySeconds) AND a lesson step is stalled;
   // the policy floor never changes. Can only be switched on from the dock Settings UI (main drops it from any other source).
@@ -41,9 +42,15 @@ export const SettingsSchema = z.object({
   // Menu bar (SHELL). The icon is always there while on; launching at login only applies to packaged macOS builds.
   showMenuBarIcon: z.boolean().default(true),
   launchAtLogin: z.boolean().default(false),
+  // SHELL2: false (the default, also for older saved profiles without the key) keeps the side panel hidden; the menu bar item
+  // and Cmd/Ctrl+Alt+P bring it up. First run (onboardingDone false) always shows it so setup is visible.
+  showDock: z.boolean().default(false),
   // FILES: the assistant may search an index of folders the user chose. Folders are added only through a native dialog in main.
   filesEnabled: z.boolean().default(false),
   fileFolders: z.array(z.string().max(1024)).max(20).default([]),
+  // NOTIFY: where a permission prompt (ask_user_confirm) appears: a small toast at the top of the screen (plus a macOS
+  // notification), or only inside the dock as before.
+  confirmStyle: z.enum(['toast', 'dock']).default('toast'),
 })
 
 export type Settings = z.infer<typeof SettingsSchema>
@@ -53,11 +60,11 @@ export type SettingsPatch = z.infer<typeof SettingsPatchSchema>
 export const DEFAULT_SETTINGS: Settings = SettingsSchema.parse({})
 
 // Keeps the legacy boolean and `agency` in step. A patch that sets `agency` decides; a patch that only sets the boolean
-// (older UI) maps true -> the current non-off level (default ask_each) and false -> off.
+// (older UI) maps true -> the current non-off level (default ask_per_task) and false -> off.
 export function reconcileAgency(current: Pick<Settings, 'agency'>, patch: SettingsPatch): SettingsPatch {
   if (patch.agency !== undefined) return { ...patch, doItForMeAllowed: patch.agency !== 'off' }
   if (patch.doItForMeAllowed !== undefined) {
-    return { ...patch, agency: patch.doItForMeAllowed ? (current.agency === 'off' ? 'ask_each' : current.agency) : 'off' }
+    return { ...patch, agency: patch.doItForMeAllowed ? (current.agency === 'off' ? 'ask_per_task' : current.agency) : 'off' }
   }
   return patch
 }
@@ -72,7 +79,7 @@ export function coerceSettings(raw: unknown): Settings {
     if (parsed.success) out[key] = parsed.data
   }
   // An older file has only the boolean: honour it, then keep the pair consistent.
-  if (!('agency' in raw) && out.doItForMeAllowed === true) out.agency = 'ask_each'
+  if (!('agency' in raw) && out.doItForMeAllowed === true) out.agency = 'ask_per_task'
   out.doItForMeAllowed = out.agency !== 'off'
   return out as Settings
 }

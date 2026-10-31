@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
 }))
 
 import { Bus } from '../../src/main/bus'
-import { registerHotkeys, START_ACCELERATORS, STOP_ACCELERATORS } from '../../src/main/hotkey'
+import { registerHotkeys, PANEL_ACCELERATORS, START_ACCELERATORS, STOP_ACCELERATORS } from '../../src/main/hotkey'
 import { StateStore } from '../../src/main/state'
 import { registerSession } from '../../src/main/session'
 import { IPC } from '../../src/shared/ipc'
@@ -113,5 +113,25 @@ describe('Stop hotkey against the real session controller', () => {
     expect(sendDock).toHaveBeenCalledWith(IPC.sessionStop, 'stop')
     expect(state.get().phase).toBe('listening_for_name')
     expect(services.runner.abort).toHaveBeenCalled()
+  })
+
+  it('registers the panel shortcut only when a toggle is supplied, and it calls it', () => {
+    registerHotkeys(new Bus(), settingsStub(null))
+    expect(handlers.has(PANEL_ACCELERATORS[0])).toBe(false)
+    const togglePanel = vi.fn()
+    registerHotkeys(new Bus(), settingsStub(null), { togglePanel })
+    expect(PANEL_ACCELERATORS[0]).toBe('CommandOrControl+Alt+P')
+    for (const a of PANEL_ACCELERATORS) expect(handlers.has(a)).toBe(true)
+    handlers.get(PANEL_ACCELERATORS[0])!()
+    expect(togglePanel).toHaveBeenCalledTimes(1)
+  })
+
+  it('tolerates the panel combos being taken: no throw, no error banner, the others still work', () => {
+    taken = new Set(PANEL_ACCELERATORS)
+    const state = new StateStore(DEFAULT_SETTINGS)
+    const off = registerHotkeys(new Bus(), settingsStub(null), { state, togglePanel: vi.fn() })
+    expect(state.get().lastError).toBeUndefined()
+    expect(handlers.has(START_ACCELERATORS[0])).toBe(true)
+    off()
   })
 })

@@ -1,11 +1,13 @@
 import path from 'node:path'
-import { app, BrowserWindow, screen, session } from 'electron'
+import { app, BrowserWindow, screen, session, shell } from 'electron'
 import type { DockMode, EventArgs, EventChannel } from '../shared/ipc'
 import { configureOverlayWindow } from './capture/overlay-window'
 
 export interface WindowOptions {
   noOverlay: boolean
   headless: boolean
+  // SHELL2: when false the dock window is created but kept hidden (the renderer still runs: mic, wake spotter, Live session).
+  showDockAtStart?: boolean
 }
 
 export interface Windows {
@@ -29,6 +31,13 @@ const DOCK_SIZES: Record<DockMode, { width: number; height: number }> = {
   expanded: { width: 360, height: 580 },
 }
 const MARGIN = 16
+
+// NOTIFY: extra windows of ours (the confirmation toast) whose IPC owns() should accept. Returns the undo.
+const adoptedOwners = new Set<number>()
+export function adoptOwner(webContentsId: number): () => void {
+  adoptedOwners.add(webContentsId)
+  return () => void adoptedOwners.delete(webContentsId)
+}
 
 function loadRenderer(win: BrowserWindow, entry: 'dock' | 'overlay'): void {
   const devUrl = process.env.ELECTRON_RENDERER_URL
@@ -76,7 +85,7 @@ export function createWindows(opts: WindowOptions): Windows {
   dock.setAlwaysOnTop(true, 'floating')
   dock.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   loadRenderer(dock, 'dock')
-  if (!opts.headless) dock.once('ready-to-show', () => dock.showInactive())
+  if (!opts.headless && opts.showDockAtStart !== false) dock.once('ready-to-show', () => dock.showInactive())
 
   let overlay: BrowserWindow | null = null
   if (!opts.noOverlay) {
@@ -112,12 +121,18 @@ export function createWindows(opts: WindowOptions): Windows {
   // Our windows never navigate away from the bundled UI and never open new windows (a link or script cannot load a remote page into them).
   for (const win of [dock, overlay]) {
     if (!win) continue
-    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    // Never a new window; a plain http(s) link goes to the user's browser, anything else is dropped.
+    win.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) void shell.openExternal(url).catch(() => undefined)
+      return { action: 'deny' }
+    })
     win.webContents.on('will-navigate', (event) => event.preventDefault())
   }
 
   // Our own windows may use the mic/camera/screen; nothing else may.
   const ours = (id: number | undefined) => id !== undefined && (id === dock.webContents.id || id === overlay?.webContents.id)
+  // NOTIFY: the toast window may use our IPC (answer a confirm) but gets no mic/screen permission, so only owns() knows it.
+  const ownsOrAdopted = (id: number | undefined) => ours(id) || (id !== undefined && adoptedOwners.has(id))
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
     callback(ours(wc?.id) && ['media', 'display-capture', 'mediaKeyboardLock'].includes(permission))
   })
@@ -167,7 +182,7 @@ export function createWindows(opts: WindowOptions): Windows {
     },
     isDockVisible: () => !dock.isDestroyed() && dock.isVisible(),
     getDockMode: () => dockMode,
-    owns: ours,
+    owns: ownsOrAdopted,
     overlayPng: () => capture(overlay),
     dockPng: () => capture(dock),
     overlaySize: () => (overlay ? overlay.getBounds() : null),

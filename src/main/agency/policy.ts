@@ -55,7 +55,7 @@ export type PolicyDecision =
   | { allowed: true; ask: boolean; risk: Risk; reason: string; flags: string[] }
 
 export const LOW_CONFIDENCE = 0.7
-export const MAX_ACTIONS_PER_TASK = 8
+export const MAX_ACTIONS_PER_TASK = 12
 export const MIN_ACTION_GAP_MS = 1500
 export const MAX_TYPED_CHARS = 300
 
@@ -302,6 +302,23 @@ export function riskWords(...texts: (string | undefined)[]): string | null {
   return null
 }
 
+// ---------- goal text: negated clauses ----------
+
+// "do not sign in or submit anything", "never click Agree", "without paying", "avoid the ads", "leave any cookie banner alone":
+// a clause the person wrote to RULE OUT something must not make the goal itself look like that thing. Each negation removes
+// text up to the next period / semicolon / ", and" / ", then" / ", but" (or the end). Only the GOAL scan uses this; the
+// label, target-text and typed-text scans never do. "never mind" is not a negation of the next words.
+const NEGATED_CLAUSE =
+  /(?:\b(?:do\s+not|don['’]t|do\s*n['’]t|never(?!\s+mind)|without|avoid|avoiding)\b|\bleave\b(?=[^.;]*\balone\b))[^.;]*?(?=,\s*(?:and|then|but)\b|[.;]|$)/gi
+
+export function stripNegatedClauses(goal: string): string {
+  return goal.replace(NEGATED_CLAUSE, ' ').replace(/\s+/g, ' ').trim()
+}
+
+// Consent / cookie words: the person's own choice, never made for them.
+const CONSENT_WORD = /^(?:agree|i\s+agree|consent|cookie|allow\s+all|accept\s+all)/i
+export const isConsentWord = (word: string): boolean => CONSENT_WORD.test(word.trim())
+
 export function typedTextProblem(text: string, stageOrigin?: string): string | null {
   if (text.length > MAX_TYPED_CHARS) return 'that is too much text to type for someone'
   const word = riskWords(text)
@@ -324,7 +341,9 @@ export function appProblem(name: string): string | null {
   return null
 }
 
-function baseRisk(action: ProposedAction): Risk {
+function baseRisk(action: ProposedAction, ctx: PolicyContext): Risk {
+  // Plain typed text that already passed every text scan is part of the plan the learner approved (ask_per_task).
+  if (action.kind === 'type' && ctx.agency === 'ask_per_task' && ctx.planApproved) return 'low'
   switch (action.kind) {
     case 'click':
     case 'double_click':
@@ -340,7 +359,8 @@ function baseRisk(action: ProposedAction): Risk {
 export function evaluateGoal(goal: string, ctx: PolicyContext): PolicyDecision {
   const gate = baseGate(ctx)
   if (gate) return gate
-  const word = riskWords(goal)
+  const word = riskWords(stripNegatedClauses(goal))
+  if (word && isConsentWord(word)) return blocked(`"${word}" is a consent choice, and I leave consent choices to you. I will show you instead.`, [`goal:${word}`])
   if (word) return blocked(`"${word}" could involve money, passwords, messages, deleting things or permissions, so I never do that for you. I will show you instead.`, [`goal:${word}`])
   return { allowed: true, ask: true, risk: 'low', reason: 'goal accepted', flags: [] }
 }
@@ -361,6 +381,7 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
 
   // The hard denylist applies to the grounded label, the target text and any typed text.
   const word = riskWords(action.label, action.targetText, action.kind === 'type' ? action.text : undefined)
+  if (word && isConsentWord(word)) return blocked(`"${word}" is a consent choice (cookies, agreeing to terms). I leave consent choices to you: I will show where it is and leave it to you.`, [`word:${word}`, 'consent'])
   if (word) return blocked(`"${word}" could involve money, passwords, messages, deleting things or permissions, so I never do that. I will show it and leave it to you.`, [`word:${word}`])
 
   switch (action.kind) {
@@ -404,7 +425,7 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
       break
   }
 
-  let risk = baseRisk(action)
+  let risk = baseRisk(action, ctx)
   if (CONFIRM_WORDS.test(`${action.label ?? ''} ${action.targetText ?? ''}`)) {
     flags.push('send_shaped')
     risk = 'medium'
@@ -431,7 +452,7 @@ export class ActionLimiter {
   constructor(
     private readonly maxPerTask = MAX_ACTIONS_PER_TASK,
     private readonly gapMs = MIN_ACTION_GAP_MS,
-    private readonly maxPerMinute = 12,
+    private readonly maxPerMinute = 16,
   ) {}
 
   // ok:true => the caller may act now (the action is counted). wait => retry the SAME check after waitMs (never the action).

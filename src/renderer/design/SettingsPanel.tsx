@@ -82,6 +82,7 @@ export function SettingsPanel({ settings, onChange, personas, more }: SettingsPa
             <span aria-hidden="true">Larger</span>
           </div>
         </Field>
+        <Switch label="Keep the panel open" hint="Off hides it until you ask, from the menu bar" checked={settings.showDock} onChange={toggle('showDock')} />
         <Switch label="Easier-to-read font" hint="OpenDyslexic" checked={settings.dyslexiaFont} onChange={toggle('dyslexiaFont')} />
         <Field label="Theme">
           <Segmented

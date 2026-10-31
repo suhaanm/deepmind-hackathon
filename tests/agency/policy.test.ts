@@ -35,10 +35,17 @@ describe('tiers', () => {
       const d = per(a)
       expect(d.allowed && d.ask).toBe(false)
     }
-    for (const a of [{ kind: 'type', text: 'weather' }, { kind: 'keys', value: 'return' }, { kind: 'open_app', value: 'Safari' }, { kind: 'click', label: 'Reply' }, { kind: 'click', label: 'Start call', confidence: 0.4 }] as ProposedAction[]) {
+    for (const a of [{ kind: 'keys', value: 'return' }, { kind: 'open_app', value: 'Safari' }, { kind: 'click', label: 'Reply' }, { kind: 'click', label: 'Start call', confidence: 0.4 }] as ProposedAction[]) {
       const d = per(a)
       expect(d.allowed && d.ask).toBe(true)
     }
+    // plain scanned text typed under an approved plan is part of the plan; unapproved, or send-shaped, it still asks
+    const typed = per({ kind: 'type', text: 'weather' })
+    expect(typed.allowed && typed.ask).toBe(false)
+    const typedUnplanned = per({ kind: 'type', text: 'weather' }, false)
+    expect(typedUnplanned.allowed && typedUnplanned.ask).toBe(true)
+    const typedLow = per({ kind: 'type', text: 'weather', confidence: 0.4 })
+    expect(typedLow.allowed && typedLow.ask).toBe(true)
     const unplanned = per({ kind: 'click', label: 'Start call' }, false)
     expect(unplanned.allowed && unplanned.ask).toBe(true)
   })
@@ -176,13 +183,13 @@ describe('apps, files, settings panes, keys', () => {
 })
 
 describe('rate and step limits', () => {
-  it('needs 1.5 s between actions and allows 8 per task', () => {
+  it('needs 1.5 s between actions and allows 12 per task', () => {
     const l = new ActionLimiter()
     expect(l.take(0)).toEqual({ ok: true })
     expect(l.take(1000)).toEqual({ ok: false, why: 'gap', waitMs: 500 })
     let t = 1500
-    for (let i = 1; i < 8; i++, t += 1500) expect(l.take(t)).toEqual({ ok: true })
-    expect(l.used).toBe(8)
+    for (let i = 1; i < 12; i++, t += 1500) expect(l.take(t)).toEqual({ ok: true })
+    expect(l.used).toBe(12)
     expect(l.take(t + 5000)).toEqual({ ok: false, why: 'task_limit' })
   })
   it('a runaway caller hits the per-minute backstop', () => {
@@ -204,16 +211,16 @@ describe('agency setting', () => {
   it('keeps doItForMeAllowed = agency !== off', () => {
     expect(reconcileAgency({ agency: 'off' }, { agency: 'ask_each' })).toMatchObject({ agency: 'ask_each', doItForMeAllowed: true })
     expect(reconcileAgency({ agency: 'ask_each' }, { agency: 'off' })).toMatchObject({ agency: 'off', doItForMeAllowed: false })
-    expect(reconcileAgency({ agency: 'off' }, { doItForMeAllowed: true })).toMatchObject({ agency: 'ask_each', doItForMeAllowed: true })
+    expect(reconcileAgency({ agency: 'off' }, { doItForMeAllowed: true })).toMatchObject({ agency: 'ask_per_task', doItForMeAllowed: true })
     expect(reconcileAgency({ agency: 'ask_per_task' }, { doItForMeAllowed: true })).toMatchObject({ agency: 'ask_per_task' })
     expect(reconcileAgency({ agency: 'ask_each' }, { doItForMeAllowed: false })).toMatchObject({ agency: 'off' })
     expect(reconcileAgency({ agency: 'ask_each' }, { captions: false })).toEqual({ captions: false })
   })
-  it('defaults to ask_each and reads older files', () => {
-    expect(coerceSettings({}).agency).toBe('ask_each')
+  it('defaults to ask_per_task and reads older files', () => {
+    expect(coerceSettings({}).agency).toBe('ask_per_task')
     expect(coerceSettings({}).doItForMeAllowed).toBe(true)
-    expect(coerceSettings({ doItForMeAllowed: true })).toMatchObject({ agency: 'ask_each', doItForMeAllowed: true })
+    expect(coerceSettings({ doItForMeAllowed: true })).toMatchObject({ agency: 'ask_per_task', doItForMeAllowed: true })
     expect(coerceSettings({ agency: 'ask_per_task' })).toMatchObject({ agency: 'ask_per_task', doItForMeAllowed: true })
-    expect(coerceSettings({ agency: 'nonsense' })).toMatchObject({ agency: 'ask_each', doItForMeAllowed: true })
+    expect(coerceSettings({ agency: 'nonsense' })).toMatchObject({ agency: 'ask_per_task', doItForMeAllowed: true })
   })
 })

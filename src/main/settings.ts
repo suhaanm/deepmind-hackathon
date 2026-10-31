@@ -21,8 +21,9 @@ export class SettingsStore {
     if (!this.file) return { ...DEFAULT_SETTINGS }
     try {
       const loaded = coerceSettings(JSON.parse(fs.readFileSync(this.file, 'utf8')))
-      // Profiles saved before the assistant could act carry agency 'off' they never chose: switch them to ask-each-time.
-      return !loaded.agencyChosen && loaded.agency === 'off' ? { ...loaded, agency: 'ask_each', doItForMeAllowed: true } : loaded
+      // Profiles that never chose a level (agencyChosen false) carry 'off' (saved before the assistant could act) or 'ask_each'
+      // (the previous default): move them to the current default, ask_per_task (confirm the plan once; risky steps still ask).
+      return !loaded.agencyChosen && (loaded.agency === 'off' || loaded.agency === 'ask_each') ? { ...loaded, agency: 'ask_per_task', doItForMeAllowed: true } : loaded
     } catch {
       return { ...DEFAULT_SETTINGS }
     }

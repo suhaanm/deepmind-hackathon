@@ -113,8 +113,8 @@ describe('autonomous agency', () => {
 })
 
 describe('autonomous settings', () => {
-  it('zod and migration accept autonomous; default is ask_each and 60 s', () => {
-    expect(DEFAULT_SETTINGS.agency).toBe('ask_each')
+  it('zod and migration accept autonomous; default is ask_per_task and 60 s', () => {
+    expect(DEFAULT_SETTINGS.agency).toBe('ask_per_task')
     expect(DEFAULT_SETTINGS.awaySeconds).toBe(60)
     expect(SettingsSchema.shape.agency.safeParse('autonomous').success).toBe(true)
     expect(SettingsSchema.shape.awaySeconds.safeParse(2).success).toBe(false)
@@ -124,7 +124,7 @@ describe('autonomous settings', () => {
 
   it('only a trusted (dock UI) patch can switch it on', () => {
     const s = new SettingsStore(null)
-    expect(s.patch({ agency: 'autonomous', awaySeconds: 3 }).agency).toBe('ask_each')
+    expect(s.patch({ agency: 'autonomous', awaySeconds: 3 }).agency).toBe('ask_per_task')
     expect(s.get().awaySeconds).toBe(60)
     expect(s.patch({ agency: 'autonomous' }, { trusted: true }).agency).toBe('autonomous')
     expect(s.get().doItForMeAllowed).toBe(true)

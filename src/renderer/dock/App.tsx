@@ -25,7 +25,8 @@ export function App(): ReactElement | null {
 
   const personaId = state?.persona ?? settings?.persona ?? DEFAULT_PERSONA
   const personaName = PERSONAS[personaId].displayName
-  const confirmPending = state?.pendingConfirm !== undefined
+  // NOTIFY: while the top-right toast shows this request, the dock stays as it is (one prompt, never two).
+  const confirmPending = state?.pendingConfirm !== undefined && state.toastConfirm?.id !== state.pendingConfirm.id
   const onboarding = settings !== null && !settings.onboardingDone
   // The walkthrough's controls need room, so the panel stays open while the demo runs (they never cover the header).
   const demoRunning = useShowtimeActive()
@@ -141,7 +142,7 @@ export function App(): ReactElement | null {
       ) : (
         <Pill state={state} personaName={personaName} onExpand={() => setExpanded(true)} onStop={() => window.alongside.pressStop()} />
       )}
-      {state.pendingConfirm ? (
+      {state.pendingConfirm && confirmPending ? (
         <ConfirmModal compact request={state.pendingConfirm} personaName={personaName} onAnswer={(choice) => window.alongside.answerConfirm({ id: state.pendingConfirm!.id, choice })} />
       ) : null}
     </div>

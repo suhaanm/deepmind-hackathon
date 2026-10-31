@@ -11,6 +11,8 @@ import type { SessionEndReason } from '../shared/protocol'
 // the presenter's escape hatch if the app hangs) and Ctrl+Alt+Space (switches input source for multilingual users).
 export const START_ACCELERATORS = ['CommandOrControl+Alt+Space', 'CommandOrControl+Alt+Shift+Space', 'CommandOrControl+Alt+Shift+S'] as const
 export const STOP_ACCELERATORS = ['CommandOrControl+Alt+M', 'CommandOrControl+Alt+Shift+X'] as const
+// SHELL2: show or hide the side panel (the menu bar item does the same). Losing every combo is tolerated: the menu bar still works.
+export const PANEL_ACCELERATORS = ['CommandOrControl+Alt+P', 'CommandOrControl+Alt+Shift+P'] as const
 
 const ACTIVE = new Set(['connecting', 'live', 'thinking', 'speaking'])
 
@@ -19,17 +21,20 @@ export interface HotkeyDeps {
   stop?: (reason: SessionEndReason) => void
   // Lets Start ignore presses while a session is already running, and lets a registration failure show up in state.
   state?: StateStore
+  // SHELL2: toggles the side panel. When omitted the panel shortcut is not registered.
+  togglePanel?: () => void
 }
 
 export interface HotkeyReport {
   start: string[]
   stop: string[]
+  panel: string[]
   failed: string[]
 }
 
 export function registerHotkeys(bus: Bus, settings: SettingsStore, deps: HotkeyDeps = {}): () => void {
   const registered: string[] = []
-  const report: HotkeyReport = { start: [], stop: [], failed: [] }
+  const report: HotkeyReport = { start: [], stop: [], panel: [], failed: [] }
 
   const onStart = (): void => {
     if (deps.state && ACTIVE.has(deps.state.get().phase)) return
@@ -59,8 +64,12 @@ export function registerHotkeys(bus: Bus, settings: SettingsStore, deps: HotkeyD
 
   bind(START_ACCELERATORS, onStart, report.start)
   bind(STOP_ACCELERATORS, onStop, report.stop)
+  if (deps.togglePanel) {
+    const toggle = deps.togglePanel
+    bind(PANEL_ACCELERATORS, () => toggle(), report.panel)
+  }
 
-  console.log(`[hotkey] start: ${report.start.join(', ') || 'NONE'} | stop: ${report.stop.join(', ') || 'NONE'}${report.failed.length ? ` | unavailable: ${report.failed.join(', ')}` : ''}`)
+  console.log(`[hotkey] start: ${report.start.join(', ') || 'NONE'} | stop: ${report.stop.join(', ') || 'NONE'}${deps.togglePanel ? ` | panel: ${report.panel.join(', ') || 'NONE'}` : ''}${report.failed.length ? ` | unavailable: ${report.failed.join(', ')}` : ''}`)
   if (deps.state) {
     if (!report.start.length) deps.state.patch({ lastError: 'The keyboard shortcut for starting is taken by another app. Use the on-screen button to start.' })
     else if (!report.stop.length) deps.state.patch({ lastError: 'The keyboard shortcut for stopping is taken by another app. Use the on-screen Stop button.' })

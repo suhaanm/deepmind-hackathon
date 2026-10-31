@@ -3,10 +3,14 @@
 //   - a mutation only ever follows a FRESH screen read; every step is one model call on one fresh screenshot
 //   - the model proposes ONE action; our policy decides, never the model's words; the action is shown on screen
 //     (ring + ghost-cursor path + a plain sentence) BEFORE it runs, and confirmed with a real click per settings.agency
-//   - a failed action is never retried; the same action id is never run twice; no visible effect twice in a row ends the task
+//   - a failed action is never retried; the same action id is never run twice (the model is told so and gets up to 2 recoveries
+//     to pick another step); a click on the same element is never made more than twice
+//   - no visible effect: a short wait and a second look, then ONE re-plan with feedback; a second miss in a row ends the task
+//   - typed text that does not show on screen is retried once by clipboard paste (the clipboard is restored)
 //   - success is claimed only when the Verifier confirms the goal on a fresh screenshot
 //   - the goal text the learner gave is the only task; screen text is data (see computer-use.ts)
-//   - at most 8 actions, 90 s in total, Stop (session:ended) ends it at the next check and nothing is left half-done
+//   - scope: the frontmost app is read before every action; another app (or Claude / a terminal) coming to the front stops the task
+//   - at most 12 actions, 120 s in total, Stop (session:ended) ends it at the next check and nothing is left half-done
 // Without macOS Accessibility the loop never acts: it rings the target and tells the learner what to click.
 import { createHash } from 'node:crypto'
 import type { AgentChip, AgencyCode, AgencyResult, Annotation, NormPoint, Shot } from '../../shared/protocol'
@@ -34,8 +38,15 @@ import type { AxResolve } from './ax-resolver'
 import { proposeNext, type Proposal, type ProposeRequest, type ProposedStep } from './computer-use'
 import { ActionLimiter, evaluateAction, evaluateGoal, MAX_ACTIONS_PER_TASK, type ProposedAction } from './policy'
 import type { DoneForMeSink } from './open-for-me'
+import { checkScope, isOwnApp, scopeFromGoal, type FrontApp, type ScopeState } from './scope'
 
-export const MAX_TASK_MS = 90_000
+export const MAX_TASK_MS = 120_000
+// The model asking for an already-run step again: it is told, and may pick another step this many times per task.
+export const MAX_REPEAT_RECOVERIES = 2
+// A click on the same element is never made more than this many times in one task.
+export const MAX_CLICKS_PER_ELEMENT = 2
+// Short pause between clicking a field and typing into it, so focus has settled.
+const FOCUS_SETTLE_MS = 350
 const PROPOSE_MS = 25_000
 const SETTLE_MS = 900
 const GHOST_TTL_MS = 20_000
@@ -54,6 +65,8 @@ export interface ActOptions {
   cursor?: () => NormPoint | null
   // Accessibility-first resolver: re-run right before each click/double-click; null = keep the vision coordinates.
   resolveAx?: AxResolve
+  // Frontmost application name (scope enforcement); absent or null = unknown, never blocks.
+  frontApp?: FrontApp
 }
 
 const hashOf = (shot: Shot): string => createHash('sha1').update(shot.jpegBase64).digest('hex')
@@ -116,10 +129,12 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
   const propose = opts.propose ?? ((req) => proposeNext(opts.gemini(), req))
   let active: { epoch: number; chipId: string } | null = null
   let chipSeq = 0
+  // The frontmost app as last read (name only), written into every audit line of the task.
+  let frontNow: string | undefined
 
   const audit = async (entry: Omit<AgencyAuditEntry, 'tool'>): Promise<void> => {
     try {
-      await appendAgencyAudit(ctx.userDataDir, { tool: 'act_for_me', ...entry, ...(entry.decision === 'allowed' && sit.lastApproval ? { approval: sit.lastApproval } : {}) }, now)
+      await appendAgencyAudit(ctx.userDataDir, { tool: 'act_for_me', ...(frontNow ? { app: frontNow } : {}), ...entry, ...(entry.decision === 'allowed' && sit.lastApproval ? { approval: sit.lastApproval } : {}) }, now)
     } catch (err) {
       ctx.log('agency', 'audit write failed:', err instanceof Error ? err.message : err)
     }
@@ -184,10 +199,57 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
     const history: string[] = []
     const seen = new Set<string>()
     const limiter = new ActionLimiter(maxSteps)
+    const scopeState: ScopeState = { scope: scopeFromGoal(task) }
+    frontNow = undefined
+    const clicksOn = new Map<string, number>()
+    let repeatRecoveries = 0
+    let feedback: string | undefined
+    let lastNote = 'nothing has been done yet'
+    // Before every action: is the frontmost app still the one this task is about? null = fine, else the stopping result.
+    const checkFront = async (steps: number): Promise<AgencyResult | null> => {
+      if (!opts.frontApp) return null
+      let name: string | null = null
+      try {
+        name = await opts.frontApp()
+      } catch {
+        name = null
+      }
+      if (name) frontNow = name
+      const verdict = checkScope(scopeState, name)
+      if (verdict.ok) return null
+      clearScreen()
+      await audit({ decision: 'blocked', ok: false, code: 'blocked', label: 'scope', step: steps })
+      return result('blocked', false, false, `${verdict.message} Steps done so far: ${steps}.`, { steps })
+    }
+    // The model asked for a step that already ran (or a third click on one element): tell it, do not stop yet.
+    const recoverRepeat = async (what: string, steps: number): Promise<AgencyResult | null> => {
+      repeatRecoveries++
+      if (repeatRecoveries > MAX_REPEAT_RECOVERIES) {
+        await audit({ decision: 'blocked', ok: false, code: 'gave_up', label: 'repeat', step: steps })
+        return result('gave_up', true, false, 'The helper kept asking for the same step, so I stopped instead of repeating it. Show the learner instead.', { steps })
+      }
+      feedback = `You already did "${oneLine(what, 80)}"; ${lastNote}; choose a DIFFERENT next step or finish.`
+      history.push(`(asked for "${oneLine(what, 110)}" again: not repeated)`)
+      await audit({ decision: 'allowed', ok: false, code: 'repeat', label: `recovery ${repeatRecoveries}`, step: steps })
+      return null
+    }
     const stopResult = async (done: number): Promise<AgencyResult> => {
       clearScreen()
       await audit({ decision: 'stopped', ok: false, code: 'stopped', label: 'task', step: done })
       return result('stopped', true, false, 'Stop was pressed, so the task ended right there. Nothing was left half-done.', { steps: done })
+    }
+
+    // Scope: record the frontmost app BEFORE any prompt takes the focus (the verdict is only used before actions, not here).
+    if (opts.frontApp) {
+      try {
+        const name = await opts.frontApp()
+        if (name) {
+          frontNow = name
+          checkScope(scopeState, name)
+        }
+      } catch {
+        // unreadable: scope checks stay lenient
+      }
     }
 
     // ask_per_task: the learner confirms the plan (their own goal) once. ask_each skips this and confirms every action.
@@ -207,7 +269,9 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
     let carry: Shot | null = null
     let done = 0
     let unchanged = 0
-    for (let n = 1; n <= maxSteps + 1; n++) {
+    let prevWasClick = false
+    // Recoveries (repeat feedback, one re-plan) cost a model call but no action: they get their own headroom.
+    for (let n = 1; n <= maxSteps + 1 + MAX_REPEAT_RECOVERIES + 2; n++) {
       if (stopped()) return stopResult(done)
       if (now() - started > totalMs) {
         await audit({ decision: 'allowed', ok: false, code: 'gave_up', label: 'timeout', step: done })
@@ -219,10 +283,14 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       const fresh = carry && now() - carry.takenAt < 2500 ? carry : await s.capture.grab('ground')
       carry = null
       if (stopped()) return stopResult(done)
+      const outOfScope = await checkFront(done)
+      if (outOfScope) return outOfScope
 
       let proposal: Proposal
       try {
-        proposal = await propose({ goal: task, history, shot: fresh, timeoutMs: Math.max(3000, Math.min(PROPOSE_MS, totalMs - (now() - started))) })
+        const note = feedback
+        feedback = undefined
+        proposal = await propose({ goal: task, history, shot: fresh, timeoutMs: Math.max(3000, Math.min(PROPOSE_MS, totalMs - (now() - started))), ...(note ? { feedback: note } : {}) })
       } catch (err) {
         await audit({ decision: 'allowed', ok: false, code: 'failed', label: 'model', step: done })
         return result('failed', true, false, `${plainFailure(err)} Nothing was changed. Show the learner how to do it instead.`, { steps: done })
@@ -252,8 +320,9 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       }
       // The same request is never run twice, even if the screen looks the same: the model must find another way.
       if (seen.has(step.id)) {
-        await audit({ decision: 'blocked', ok: false, code: 'gave_up', label: 'repeat', step: done })
-        return result('gave_up', true, false, 'The helper kept asking for the same step, so I stopped instead of repeating it. Show the learner instead.', { steps: done })
+        const stop = await recoverRepeat(say(step), done)
+        if (stop) return stop
+        continue
       }
       seen.add(step.id)
 
@@ -305,6 +374,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       // Re-ground right before the click: the model's coordinates (0-999 on a whole-screen shot) are only good to about
       // +-20 points, more than half a calculator key. Ask Accessibility for the exact frame of the thing the model named.
       let target: ProposedStep = step
+      let axKey: string | undefined
       if (opts.resolveAx && step.point && (step.tool === 'click' || step.tool === 'double_click')) {
         const ax = await opts.resolveAx(`${step.intent} ${step.safety?.explanation ?? ''}`.trim(), step.point)
         if (ax) {
@@ -317,9 +387,41 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
             return result(axDecision.code, false, false, `${axDecision.reason} Steps done so far: ${done}.`, { steps: done, label: oneLine(ax.text, 60) })
           }
           target = { ...step, point: ax.point }
+          axKey = `ax:${oneLine(ax.text, 60).toLowerCase()}`
           safely(ctx, 'overlay', () => s.overlay.show([{ id: RING_ID, kind: 'ring', tone: 'guide', box: boxAroundPoint(ax.point, 30), label: oneLine(what, 40), ttlMs: GHOST_TTL_MS }]))
         }
       }
+      // The confirmation prompt may have taken the focus (and a different app may have come up): check the scope again, and
+      // before typing or pressing keys bring the target app back, otherwise the keystrokes land in Alongside itself.
+      const stillInScope = await checkFront(done)
+      if (stillInScope) return stillInScope
+      const refocusApp = scopeState.target ?? (scopeState.scope.kind === 'app' ? scopeState.scope.app : undefined)
+      if ((step.tool === 'type' || step.tool === 'keys') && opts.frontApp && refocusApp && !actuator.status().dryRun) {
+        let cur: string | null = null
+        try {
+          cur = await opts.frontApp()
+        } catch {
+          cur = null
+        }
+        if (cur && isOwnApp(cur)) {
+          await actuator.openApp(refocusApp)
+          await sleep(400)
+          const back = await checkFront(done)
+          if (back) return back
+        }
+      }
+      // One element is never clicked more than twice: the AX element's words when known, else the screen cell it sits in.
+      if (step.tool === 'click' || step.tool === 'double_click') {
+        const key = axKey ?? (target.point ? `pt:${Math.round(target.point.x / 40)}:${Math.round(target.point.y / 40)}` : '')
+        if (key && (clicksOn.get(key) ?? 0) >= MAX_CLICKS_PER_ELEMENT) {
+          const stop = await recoverRepeat(`${say(step)} (that element was already clicked twice)`, done)
+          if (stop) return stop
+          clearScreen()
+          continue
+        }
+        if (key) clicksOn.set(key, (clicksOn.get(key) ?? 0) + 1)
+      }
+      if (step.tool === 'type' && prevWasClick) await sleep(FOCUS_SETTLE_MS)
       for (let tries = 0; ; tries++) {
         const slot = limiter.take(now())
         if (slot.ok) break
@@ -333,6 +435,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       }
 
       const r = await perform(target)
+      prevWasClick = step.tool === 'click' || step.tool === 'double_click'
       if (!r.ok) {
         clearScreen()
         const noAx = r.reason === 'accessibility'
@@ -352,16 +455,40 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       await sleep(settleMs)
       safely(ctx, 'overlay', () => s.overlay.clear([GHOST_ID, RING_ID]))
       if (stopped()) return stopResult(done)
-      const after = await s.capture.grab('verify')
-      const changed = hashOf(after) !== hashOf(fresh)
-      unchanged = changed ? 0 : unchanged + 1
-      history.push(`${what} -> ${changed ? 'the screen changed' : 'no visible change'}`)
-      if (spot) safely(ctx, 'overlay', () => s.overlay.show([{ id: TICK_ID, kind: 'tick', tone: changed ? 'success' : 'warn', box: boxAroundPoint(spot, 30), ok: changed, ttlMs: 1500 }]))
-      // A click that changed nothing means it probably missed: stop at once instead of clicking on (keys/scroll get one more try).
-      if (unchanged >= (step.tool === 'click' || step.tool === 'double_click' ? 1 : 2)) {
-        await audit({ decision: 'allowed', ok: false, code: 'gave_up', label: 'no effect', step: done })
-        return result('gave_up', true, false, 'Nothing on the screen changed after a step, so I stopped. Nothing was retried. Show the learner instead.', { steps: done })
+      let after = await s.capture.grab('verify')
+      let changed = hashOf(after) !== hashOf(fresh)
+      let how = ''
+      // Typed text that did not show up: the keystrokes may have gone elsewhere. Retry ONCE by pasting (clipboard restored), and say so.
+      if (!changed && step.tool === 'type' && actuator.pasteText && !stopped()) {
+        const pr = await actuator.pasteText(step.text ?? '')
+        how = pr.ok ? ' (typing did not show, so I pasted the text once)' : ' (typing did not show and pasting failed)'
+        await audit({ decision: 'allowed', ok: pr.ok, code: pr.ok ? 'step' : 'failed', label: 'type: paste fallback', step: done })
+        if (pr.ok) {
+          await sleep(settleMs)
+          after = await s.capture.grab('verify')
+          changed = hashOf(after) !== hashOf(fresh)
+        }
       }
+      // Slow screens: wait a moment and look again before calling it no progress.
+      if (!changed && !stopped()) {
+        await sleep(settleMs * 2)
+        const later = await s.capture.grab('verify')
+        if (hashOf(later) !== hashOf(fresh)) {
+          after = later
+          changed = true
+        }
+      }
+      unchanged = changed ? 0 : unchanged + 1
+      lastNote = changed ? 'the screen changed after your last step' : 'the screen did not change after your last step'
+      history.push(`${what} -> ${changed ? 'the screen changed' : 'no visible change'}${how}`)
+      if (spot) safely(ctx, 'overlay', () => s.overlay.show([{ id: TICK_ID, kind: 'tick', tone: changed ? 'success' : 'warn', box: boxAroundPoint(spot, 30), ok: changed, ttlMs: 1500 }]))
+      // No visible effect: the first miss gets ONE re-plan with feedback (the next click is re-grounded through Accessibility
+      // again); a second miss in a row ends the task.
+      if (unchanged >= 2) {
+        await audit({ decision: 'allowed', ok: false, code: 'gave_up', label: 'no effect', step: done })
+        return result('gave_up', true, false, 'Nothing on the screen changed after two steps in a row, so I stopped. Show the learner instead.', { steps: done })
+      }
+      if (unchanged === 1) feedback = `Your last step ("${oneLine(what, 80)}") had no visible effect; ${lastNote.replace(' after your last step', '')} (front app: ${frontNow ?? 'unknown'}); choose a DIFFERENT next step or finish.`
       carry = after
     }
     return result('gave_up', true, false, 'I stopped without finishing. Show the learner the rest.', { steps: done })

@@ -170,12 +170,31 @@ describe('act_for_me', () => {
     nothingHappened(env)
   })
 
-  it('the same action id twice: gave_up, the actuator ran once', async () => {
-    const { env, act } = setup({}, [click(500, 400), click(500, 400), finished()])
+  it('the same action id again: the model is told (feedback), the actuator ran once, and it can recover with another step', async () => {
+    const { env, act, requests } = setup({}, [click(500, 400), click(500, 400), click(700, 300, 'Click the Next link'), finished()])
+    const r = await act.run(GOAL)
+    expect(r).toMatchObject({ done: true, code: 'done', steps: 2 })
+    expect(env.calls).toEqual(['click 500,400', 'click 700,300'])
+    expect(requests[2].feedback).toMatch(/already did .*click the start button.*DIFFERENT next step or finish/i)
+    expect(requests[2].feedback).toMatch(/the screen changed after your last step/)
+    expect(requests[3].feedback).toBeUndefined()
+    expect(env.auditLines().some((l) => l.code === 'repeat')).toBe(true)
+  })
+
+  it('more than 2 recoveries per task: gave_up (same step), the actuator still ran once', async () => {
+    const { env, act } = setup({}, [click(500, 400), click(500, 400), click(500, 400), click(500, 400), finished()])
     const r = await act.run(GOAL)
     expect(r).toMatchObject({ allowed: true, done: false, code: 'gave_up', steps: 1 })
     expect(r.reason).toMatch(/same step/i)
     expect(env.calls).toEqual(['click 500,400'])
+  })
+
+  it('never clicks the same element a third time: two near-identical points count as one element', async () => {
+    const { env, act, requests } = setup({}, [click(500, 400), click(510, 405), click(505, 402), finished()])
+    const r = await act.run(GOAL)
+    expect(env.calls).toEqual(['click 500,400', 'click 510,405'])
+    expect(r.steps).toBe(2)
+    expect(requests.at(-1)?.history.join(' ')).toMatch(/already clicked twice/)
   })
 
   it('a failed action is never retried', async () => {
@@ -187,36 +206,59 @@ describe('act_for_me', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('a click that changes nothing stops the task at once (it probably missed)', async () => {
-    const { env, act } = setup({}, [click(100, 100), click(200, 200), finished()])
-    env.shots.push(shot('SAME', 9e15), shot('SAME', 9e15))
+  it('a click that changes nothing: a short wait and a second look, ONE re-plan with feedback, then the task stops', async () => {
+    const { env, act, requests } = setup({}, [click(100, 100), click(200, 200), click(300, 300), finished()])
+    env.shots.push(...Array.from({ length: 12 }, () => shot('SAME', 9e15)))
     const r = await act.run(GOAL)
-    expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 1 })
+    expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 2 })
     expect(r.reason).toMatch(/nothing on the screen changed/i)
-    expect(env.calls).toEqual(['click 100,100'])
+    expect(env.calls).toEqual(['click 100,100', 'click 200,200'])
+    expect(requests[1].feedback).toMatch(/no visible effect.*DIFFERENT next step or finish/i)
+    expect(env.grabs.filter((g) => g === 'verify').length).toBeGreaterThanOrEqual(4)
   })
 
-  it('keys or scroll that change nothing get one more try, then the task stops', async () => {
+  it('a slow screen: the second look after a short wait sees the change, so the task goes on', async () => {
+    const { env, act } = setup({}, [click(100, 100), finished()])
+    env.shots.push(shot('SAME', 9e15), shot('SAME', 9e15), shot('LATER', env.clock.t + 5000))
+    const r = await act.run(GOAL)
+    expect(r).toMatchObject({ done: true, steps: 1 })
+  })
+
+  it('typed text that does not show on screen is retried ONCE by paste, and reported', async () => {
+    const pasted: string[] = []
+    const { env, act } = setup({ agency: 'ask_per_task' }, [click(500, 400), action({ tool: 'type', text: 'engineer', intent: 'Type the search' }), finished()])
+    ;(env.deps.actuator as { pasteText?: (t: string) => Promise<{ ok: boolean }> }).pasteText = async (t) => (pasted.push(t), { ok: true })
+    // click: changed; type: unchanged after typing, changed after the paste
+    env.shots.push(shot('A', 9e15), shot('B', 9e15), shot('B', 9e15), shot('C', 9e15))
+    const r = await act.run(GOAL)
+    expect(env.calls).toContain('type engineer')
+    expect(pasted).toEqual(['engineer'])
+    expect(r.steps).toBe(2)
+    expect(env.auditLines().some((l) => l.label === 'type: paste fallback' && l.ok === true)).toBe(true)
+    expect(JSON.stringify(env.auditLines())).not.toContain('engineer')
+  })
+
+  it('keys or scroll that change nothing get one re-plan, then the task stops', async () => {
     const { env, act } = setup({}, [
       action({ tool: 'scroll', point: { x: 500, y: 500 }, dy: 5, intent: 'Scroll down' }),
       action({ tool: 'keys', keys: 'tab', intent: 'Press tab' }),
       action({ tool: 'keys', keys: 'space', intent: 'Press space' }),
       finished(),
     ])
-    env.shots.push(shot('SAME', 9e15), shot('SAME', 9e15), shot('SAME', 9e15))
+    env.shots.push(...Array.from({ length: 12 }, () => shot('SAME', 9e15)))
     const r = await act.run(GOAL)
     expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 2 })
     expect(env.calls).toEqual(['scroll 500,500,5', 'keys tab'])
   })
 
-  it('stops at 8 steps and never claims success', async () => {
-    const queue = Array.from({ length: 12 }, (_, i) => click(50 + i * 60, 100))
+  it('stops at 12 steps and never claims success', async () => {
+    const queue = Array.from({ length: 16 }, (_, i) => click(40 + i * 55, 100))
     const { env, act, requests } = setup({}, queue)
     const r = await act.run(GOAL)
-    expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 8 })
-    expect(r.reason).toMatch(/8 steps/)
-    expect(env.calls).toHaveLength(8)
-    expect(requests.length).toBeLessThanOrEqual(9)
+    expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 12 })
+    expect(r.reason).toMatch(/12 steps/)
+    expect(env.calls).toHaveLength(12)
+    expect(requests.length).toBeLessThanOrEqual(13)
     expect(env.learned).toEqual([])
   })
 
@@ -228,14 +270,13 @@ describe('act_for_me', () => {
     expect(env.calls).toEqual(['click 500,400'])
   })
 
-  it('ask_per_task: the plan is confirmed once, low-risk clicks then run unconfirmed, typing still asks', async () => {
+  it('ask_per_task: ONE plan confirmation covers every click and plain typing; only a risky step (Return) asks again', async () => {
     const { env, act } = setup({ agency: 'ask_per_task' }, [click(500, 400), click(520, 420, 'Click the search box'), action({ tool: 'type', text: 'opening times', intent: 'Type the search' }), finished()])
     const r = await act.run(GOAL)
     expect(r).toMatchObject({ done: true, code: 'done', steps: 3 })
-    expect(env.asked).toHaveLength(2)
+    expect(env.asked).toHaveLength(1)
     expect(env.asked[0].question).toMatch(/^I'll try to: /)
     expect(env.asked[0].options).toEqual(['Yes, go ahead', 'No, I will'])
-    expect(env.asked[1].question).toMatch(/type "opening times"/)
     expect(env.calls).toEqual(['click 500,400', 'click 520,420', 'type opening times'])
     // typed text never reaches the audit log
     expect(JSON.stringify(env.auditLines())).not.toContain('opening times')
@@ -353,7 +394,7 @@ describe('act_for_me', () => {
   })
 
   it('the chip goes to error when the task could not finish', async () => {
-    const { env, act } = setup({}, [click(500, 400), click(500, 400)])
+    const { env, act } = setup({}, [click(500, 400), click(500, 400), click(500, 400), click(500, 400)])
     await act.run(GOAL)
     expect(env.state.get().agents.find((a) => a.title === 'Doing this for you')?.status).toBe('error')
   })

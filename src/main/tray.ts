@@ -10,7 +10,8 @@ import type { CompanionState, PersonaId, SessionEndReason } from '../shared/prot
 import type { ShellCommand } from '../shared/shell'
 import type { Settings } from '../shared/settings'
 import type { Bus } from './bus'
-import { START_ACCELERATORS, STOP_ACCELERATORS } from './hotkey'
+import { START_ACCELERATORS, STOP_ACCELERATORS, PANEL_ACCELERATORS } from './hotkey'
+import { trayStateKind, trayTitle } from './panel-rules'
 import type { Windows } from './windows'
 
 export type TrayIconKind = 'idle' | 'live' | 'muted'
@@ -22,6 +23,7 @@ export interface MenuEntry {
   enabled: boolean
   accelerator?: string
   separator?: boolean
+  checked?: boolean // present on checkbox entries ("Show panel")
 }
 
 export interface TrayModel {
@@ -30,17 +32,20 @@ export interface TrayModel {
   persona: PersonaId | null
   dockVisible: boolean
   showtimeRunning: boolean
+  agents?: readonly { status: string }[]
   startAccelerator?: string
   stopAccelerator?: string
+  panelAccelerator?: string
 }
 
 const ACTIVE: ReadonlySet<CompanionState['phase']> = new Set(['connecting', 'live', 'thinking', 'speaking'])
 export const isSessionActive = (phase: CompanionState['phase']): boolean => ACTIVE.has(phase)
 
 /** One plain line for the top of the menu and the tooltip. */
-export function describeStatus(model: Pick<TrayModel, 'phase' | 'micMuted' | 'persona'>): string {
+export function describeStatus(model: Pick<TrayModel, 'phase' | 'micMuted' | 'persona'> & { agents?: readonly { status: string }[] }): string {
   const name = PERSONAS[model.persona ?? DEFAULT_PERSONA].displayName
-  if (model.micMuted && model.phase !== 'asleep') return 'Microphone muted'
+  if (model.micMuted && model.phase !== 'asleep' && model.phase !== 'error') return 'Microphone muted'
+  if (trayStateKind({ phase: model.phase, micMuted: false, agents: model.agents }) === 'working') return `${name} is working for you`
   switch (model.phase) {
     case 'asleep':
       return 'Asleep'
@@ -59,8 +64,9 @@ export function describeStatus(model: Pick<TrayModel, 'phase' | 'micMuted' | 'pe
   }
 }
 
-export function iconKind(model: Pick<TrayModel, 'phase' | 'micMuted'>): TrayIconKind {
+export function iconKind(model: Pick<TrayModel, 'phase' | 'micMuted'> & { agents?: readonly { status: string }[] }): TrayIconKind {
   if (model.micMuted) return 'muted'
+  if (trayStateKind({ phase: model.phase, micMuted: false, agents: model.agents }) === 'working') return 'live' // busy for the user: same lit icon as a session
   return isSessionActive(model.phase) ? 'live' : 'idle'
 }
 
@@ -72,12 +78,12 @@ export function buildMenuEntries(model: TrayModel): MenuEntry[] {
   return [
     { id: 'status', label: describeStatus(model), enabled: false },
     sep('sep1'),
+    { id: 'panel', label: 'Show panel', enabled: true, checked: model.dockVisible, ...(model.panelAccelerator ? { accelerator: model.panelAccelerator } : {}) },
     ...PERSONA_LIST.map((p): MenuEntry => ({ id: `talk:${p.id}`, label: `Talk to ${p.displayName}`, enabled: true, ...(p.id === hotkeyPersona && model.startAccelerator ? { accelerator: model.startAccelerator } : {}) })),
     { id: 'type', label: 'Type instead', enabled: true },
     { id: 'mute', label: model.micMuted ? 'Unmute microphone' : 'Mute microphone', enabled: true },
     { id: 'stop', label: 'Stop', enabled: active, ...(model.stopAccelerator ? { accelerator: model.stopAccelerator } : {}) },
     sep('sep2'),
-    { id: 'panel', label: model.dockVisible ? 'Hide panel' : 'Show panel', enabled: true },
     { id: 'demo', label: model.showtimeRunning ? 'Stop the demo walkthrough' : 'Run the demo walkthrough', enabled: true },
     sep('sep3'),
     { id: 'setup', label: 'Set up again…', enabled: true },
@@ -106,8 +112,10 @@ export interface TrayDebugInfo {
   exists: boolean
   bounds: Rectangle | null
   tooltip: string
+  title: string // the short state word next to the icon on macOS ('' while asleep)
   icon: TrayIconKind
-  menu: { id: string; label: string; enabled: boolean; accelerator?: string }[]
+  panelVisible: boolean
+  menu: { id: string; label: string; enabled: boolean; accelerator?: string; checked?: boolean }[]
 }
 
 export interface ShellTray {
@@ -115,8 +123,9 @@ export interface ShellTray {
   info(): TrayDebugInfo
   /** Runs a menu entry by id, as a click would. Returns false for an unknown or disabled entry. */
   activate(id: string): boolean
-  /** The primary click: show the dock if hidden, otherwise toggle collapsed/expanded. */
+  /** The primary click and Cmd/Ctrl+Alt+P: show the panel if hidden, hide it if shown (persisted as `showDock`). */
   primaryClick(): void
+  togglePanel(): void
   dispose(): void
 }
 
@@ -142,6 +151,9 @@ export function registerTray(deps: TrayDeps): ShellTray {
 
   let tray: Tray | null = null
   let shownKey = ''
+  let shownTitle = ''
+  // The panel was brought up by "Type instead" while hidden: it goes away again when that session ends.
+  let tempShown = false
   const icons = new Map<TrayIconKind, NativeImage>()
 
   const model = (): TrayModel => {
@@ -153,8 +165,10 @@ export function registerTray(deps: TrayDeps): ShellTray {
       persona: st.persona,
       dockVisible: deps.windows.isDockVisible(),
       showtimeRunning: deps.showtimeRunning?.() ?? false,
+      agents: st.agents,
       startAccelerator: firstRegistered(START_ACCELERATORS),
       stopAccelerator: firstRegistered(STOP_ACCELERATORS),
+      panelAccelerator: firstRegistered(PANEL_ACCELERATORS),
     }
   }
 
@@ -163,6 +177,22 @@ export function registerTray(deps: TrayDeps): ShellTray {
     deps.windows.showDock()
     sendDock(cmd)
   }
+
+  // Idempotent: makes the window match, without touching settings. Setup in progress keeps the panel up (first run must be visible).
+  const applyPanel = (visible: boolean): void => {
+    if (visible) {
+      if (!deps.windows.isDockVisible()) showDockWith({ type: 'expand' })
+    } else if (deps.settings.get().onboardingDone && deps.windows.isDockVisible()) {
+      deps.windows.hideDock()
+    }
+  }
+  const setPanel = (visible: boolean): void => {
+    tempShown = false
+    deps.settings.patch({ showDock: visible })
+    applyPanel(visible)
+    refresh()
+  }
+  const togglePanel = (): void => setPanel(!deps.windows.isDockVisible())
 
   const run = (id: string): boolean => {
     const entry = buildMenuEntries(model()).find((e) => e.id === id)
@@ -174,7 +204,9 @@ export function registerTray(deps: TrayDeps): ShellTray {
     }
     switch (id as TrayAction) {
       case 'type':
+        if (!deps.windows.isDockVisible() && !deps.settings.get().showDock) tempShown = true // back to hidden when the session ends
         showDockWith({ type: 'view', view: 'chat' })
+        refresh()
         return true
       case 'mute':
         deps.state.patch({ micMuted: !deps.state.get().micMuted })
@@ -183,9 +215,7 @@ export function registerTray(deps: TrayDeps): ShellTray {
         deps.stop('stop')
         return true
       case 'panel':
-        if (deps.windows.isDockVisible()) deps.windows.hideDock()
-        else showDockWith({ type: 'expand' })
-        refresh()
+        togglePanel()
         return true
       case 'demo':
         deps.bus.emit('showtime:request', deps.showtimeRunning?.() ? { source: 'tray', stop: true } : { source: 'tray' })
@@ -207,16 +237,12 @@ export function registerTray(deps: TrayDeps): ShellTray {
 
   const toElectronMenu = (): Menu => {
     const template: MenuItemConstructorOptions[] = buildMenuEntries(model()).map((e) =>
-      e.separator ? { type: 'separator' } : { label: e.label, enabled: e.enabled, ...(e.accelerator ? { accelerator: e.accelerator } : {}), click: () => void run(e.id) },
+      e.separator ? { type: 'separator' } : { label: e.label, enabled: e.enabled, ...(e.checked !== undefined ? { type: 'checkbox' as const, checked: e.checked } : {}), ...(e.accelerator ? { accelerator: e.accelerator } : {}), click: () => void run(e.id) },
     )
     return Menu.buildFromTemplate(template)
   }
 
-  const primaryClick = (): void => {
-    if (!deps.windows.isDockVisible()) showDockWith({ type: 'expand' })
-    else sendDock({ type: 'toggle' })
-    refresh()
-  }
+  const primaryClick = (): void => togglePanel()
 
   const iconFor = (kind: TrayIconKind): NativeImage => {
     let image = icons.get(kind)
@@ -232,13 +258,20 @@ export function registerTray(deps: TrayDeps): ShellTray {
     const m = model()
     const kind = iconKind(m)
     const tooltip = `Alongside: ${describeStatus(m)}`
-    const key = `${kind}|${tooltip}`
+    const image = iconFor(kind)
+    // macOS shows this word next to the icon. Icon file missing: still show something.
+    const title = trayTitle(m) || (image.isEmpty() ? 'Alongside' : '')
+    const key = `${kind}|${tooltip}|${title}`
     if (key === shownKey) return
     shownKey = key
-    const image = iconFor(kind)
     tray.setImage(image)
     tray.setToolTip(tooltip)
-    if (image.isEmpty()) tray.setTitle('Alongside') // icon file missing: still show something
+    try {
+      if (title !== shownTitle || !title) tray.setTitle(title)
+    } catch {
+      /* setTitle is macOS and Linux only */
+    }
+    shownTitle = title
   }
 
   const create = (): void => {
@@ -249,6 +282,7 @@ export function registerTray(deps: TrayDeps): ShellTray {
     tray.on('click', () => primaryClick())
     tray.on('right-click', () => tray?.popUpContextMenu(toElectronMenu()))
     shownKey = ''
+    shownTitle = ''
     refresh()
     log(`menu bar item created${image.isEmpty() ? ' (icon file missing, using text title)' : ''}`)
   }
@@ -264,9 +298,24 @@ export function registerTray(deps: TrayDeps): ShellTray {
   const apply = (settings: Settings): void => (settings.showMenuBarIcon ? create() : destroy())
   apply(deps.settings.get())
 
-  const offState = deps.state.subscribe(refresh)
+  let wasActive = isSessionActive(deps.state.get().phase)
+  const offState = deps.state.subscribe(() => {
+    const active = isSessionActive(deps.state.get().phase)
+    if (wasActive && !active && tempShown) {
+      // The session that "Type instead" opened has ended: the panel returns to hidden.
+      tempShown = false
+      if (!deps.settings.get().showDock) applyPanel(false)
+    }
+    wasActive = active
+    refresh()
+  })
   const offSettings = deps.settings.onChange((next, patch) => {
     if ('showMenuBarIcon' in patch) apply(next)
+    if ('showDock' in patch) {
+      tempShown = false
+      applyPanel(next.showDock) // the Settings switch in the panel mirrors the menu bar checkbox
+      refresh()
+    }
   })
 
   return {
@@ -277,14 +326,17 @@ export function registerTray(deps: TrayDeps): ShellTray {
         exists: tray !== null,
         bounds: tray ? tray.getBounds() : null,
         tooltip: `Alongside: ${describeStatus(m)}`,
+        title: shownTitle,
         icon: iconKind(m),
+        panelVisible: m.dockVisible,
         menu: buildMenuEntries(m)
           .filter((e) => !e.separator)
-          .map(({ id, label, enabled, accelerator }) => ({ id, label, enabled, ...(accelerator ? { accelerator } : {}) })),
+          .map(({ id, label, enabled, accelerator, checked }) => ({ id, label, enabled, ...(accelerator ? { accelerator } : {}), ...(checked !== undefined ? { checked } : {}) })),
       }
     },
     activate: run,
     primaryClick,
+    togglePanel,
     dispose() {
       offState()
       offSettings()

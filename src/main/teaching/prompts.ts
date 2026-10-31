@@ -75,7 +75,7 @@ export function buildSystemInstruction(input: PromptInput): string {
     (agencyOn
       ? ' Offer to do something yourself only for a small thing they ask for, always as a choice ("I can open it for you, or show you how. Which would you like?"), then wait. After you did something, say in ONE short sentence what you did and offer to show them how next time.'
       : ' Never click or type for the learner; if asked, kindly explain that you show and guide and they do the clicking.')
-  const confirm = settings.agency === 'ask_per_task' ? 'the plan is confirmed once by the learner (risky steps still ask)' : 'confirmed by the learner'
+  const confirm = settings.agency === 'ask_per_task' ? 'the plan is confirmed ONCE by the learner, then the steps run on their own (a risky step still asks; consent and cookie choices are left to the learner)' : 'confirmed by the learner'
   const agencyTools = agencyOn
     ? `- do_it_for_me{target}: clicks ONE element, once.
 - open_for_me{kind, value}: opens ONE website, app, file or settings page (displays, text_size, sound, wifi...). To search the web, use kind url: https://www.google.com/search?q=X.

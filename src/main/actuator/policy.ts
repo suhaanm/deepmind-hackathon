@@ -21,6 +21,13 @@ const DENY = [
   'grant',
   'install',
   'accept',
+  // Consent / cookie choices are the person's own: never clicked for them (the label scan stays strict).
+  'agree',
+  'i\\s+agree',
+  'consent',
+  'cookie',
+  'allow\\s+all',
+  'accept\\s+all',
 ]
 
 const DENY_RE = new RegExp(`(?:^|[^a-z0-9])(?:${DENY.join('|')})`, 'i')

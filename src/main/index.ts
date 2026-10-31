@@ -9,6 +9,7 @@ import type { ServiceContext } from './context'
 import { startDebugServer } from './debug-server'
 import { redactingLog } from './gemini/redact'
 import { registerHotkeys } from './hotkey'
+import { shouldShowDockAtStart } from './panel-rules'
 import { registerIpc } from './ipc'
 import { registerLoginItem } from './login-item'
 import { createPermissions } from './permissions'
@@ -21,7 +22,8 @@ import { restoreProfile } from './showtime/seed'
 import { SettingsStore } from './settings'
 import { StateStore } from './state'
 import { createDispatcher } from './tools/dispatcher'
-import { createWindows } from './windows'
+import { registerToast } from './toast'
+import { adoptOwner, createWindows } from './windows'
 
 // The key lives only in REPO/.env; it is never logged or sent to a renderer.
 if (process.env.ALONGSIDE_USERDATA) app.setPath('userData', path.resolve(process.env.ALONGSIDE_USERDATA))
@@ -37,7 +39,8 @@ void app.whenReady().then(async () => {
   const bus = new Bus()
   const settings = new SettingsStore(userDataDir)
   const state = new StateStore(settings.get())
-  const windows = createWindows({ noOverlay: flag('ALONGSIDE_NO_OVERLAY'), headless })
+  // SHELL2: the panel stays hidden unless showDock is on, setup is unfinished, or there is no menu bar item to reopen it. The window still exists and runs (mic, wake spotter, Live session).
+  const windows = createWindows({ noOverlay: flag('ALONGSIDE_NO_OVERLAY'), headless, showDockAtStart: shouldShowDockAtStart(settings.get(), headless) })
 
   const ctx: ServiceContext = {
     state,
@@ -72,12 +75,15 @@ void app.whenReady().then(async () => {
   registerIpc({ ctx, services, windows, dispatch, confirm, session, permissions })
   const showtime = registerShowtime({ ctx, services, windows, dispatch, confirm, session }) // DEMO: IPC showtime:* + bus showtime:request
 
-  const unregisterHotkeys = registerHotkeys(bus, settings, { state, stop: (r) => session.stop(r) })
+  const unregisterHotkeys = registerHotkeys(bus, settings, { state, stop: (r) => session.stop(r), togglePanel: () => shellTray?.togglePanel() })
+  // NOTIFY: permission prompts also appear as a toast at the top of the screen (settings.confirmStyle; no window when headless / no overlay).
+  const toast = registerToast({ ctx, adoptOwner, disabled: headless || flag('ALONGSIDE_NO_OVERLAY') })
   const unregisterLoginItem = registerLoginItem(settings, { log: (...args) => ctx.log('login-item', ...args) })
   if (!headless) shellTray = registerTray({ bus, state, settings, windows, stop: (r) => session.stop(r), showtimeRunning: () => showtime.active(), log: (...args) => ctx.log('tray', ...args) })
   app.on('will-quit', () => {
     void showtime.dispose()
     shellTray?.dispose()
+    toast.dispose()
     unregisterLoginItem()
     permissions.dispose()
     unregisterHotkeys()
