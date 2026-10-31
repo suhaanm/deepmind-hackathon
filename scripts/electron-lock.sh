@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Usage: scripts/electron-lock.sh <role> <cmd...>
 # One Electron instance at a time across all agents. Refuses if the lock is held by a live PID
-# (set ALONGSIDE_LOCK_WAIT=<seconds> to wait instead). Kills the command (whole process group)
+# (queues first-come-first-served; ALONGSIDE_LOCK_WAIT=<seconds>, default 600, bounds the wait). Kills the command (whole process group)
 # after ALONGSIDE_LOCK_MAX_SECONDS (default 300) and exits 124.
 set -u
 # Agent/test runs only: the (unauthenticated) debug HTTP server is opt-in via ALONGSIDE_DEBUG=1 (see src/main/index.ts).
 export ALONGSIDE_DEBUG=1
 LOCK=/tmp/alongside-electron.lock
 MAX=${ALONGSIDE_LOCK_MAX_SECONDS:-300}
-WAIT=${ALONGSIDE_LOCK_WAIT:-0}
+WAIT=${ALONGSIDE_LOCK_WAIT:-600}
 
 if [ $# -lt 2 ]; then
   echo "usage: $0 <role> <cmd...>" >&2
@@ -23,23 +23,54 @@ owner_alive() {
   [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
 }
 
+# FIFO queue: every caller takes a numbered ticket and only the oldest live ticket may take the lock, so concurrent
+# agents (and the orchestrators) run one after another instead of racing or giving up. Waiting is the default.
+QUEUE=/tmp/alongside-electron-queue
+mkdir -p "$QUEUE"
+TICKET="$QUEUE/$(python3 -I -c 'import time;print(int(time.time()*1e9))')-$$-$ROLE"
+: > "$TICKET"
+trap 'rm -f "$TICKET"' EXIT
+
+my_turn() {
+  local t pid first=""
+  for t in $(ls "$QUEUE" 2>/dev/null | sort); do
+    pid=$(echo "$t" | cut -d- -f2)
+    if kill -0 "$pid" 2>/dev/null; then first=$t; break; else rm -f "$QUEUE/$t"; fi
+  done
+  [ "$first" = "$(basename "$TICKET")" ]
+}
+
+queue_position() {
+  local n=0 t
+  for t in $(ls "$QUEUE" 2>/dev/null | sort); do
+    n=$((n + 1))
+    [ "$t" = "$(basename "$TICKET")" ] && { echo "$n"; return; }
+  done
+  echo "?"
+}
+
 acquire() {
   local waited=0
   while true; do
-    if mkdir "$LOCK" 2>/dev/null; then
+    if my_turn && mkdir "$LOCK" 2>/dev/null; then
       printf '%s\n%s\n' "$ROLE" "$$" > "$LOCK/owner"
+      rm -f "$TICKET"
       return 0
     fi
     # The owner file is written right after mkdir; give a racing holder a moment before judging.
-    if [ ! -s "$LOCK/owner" ]; then sleep 0.3; fi
+    if [ -d "$LOCK" ] && [ ! -s "$LOCK/owner" ]; then sleep 0.3; fi
     if [ -s "$LOCK/owner" ] && ! owner_alive; then
       echo "[electron-lock] removing stale lock (role $(sed -n 1p "$LOCK/owner"), dead pid $(sed -n 2p "$LOCK/owner"))" >&2
       rm -rf "$LOCK"
       continue
     fi
     if [ "$waited" -ge "$WAIT" ]; then
-      echo "[electron-lock] held by role $(sed -n 1p "$LOCK/owner" 2>/dev/null) (pid $(sed -n 2p "$LOCK/owner" 2>/dev/null)); retry later or use ALONGSIDE_HEADLESS=1" >&2
+      echo "[electron-lock] gave up after ${WAIT}s in the queue (held by role $(sed -n 1p "$LOCK/owner" 2>/dev/null))" >&2
+      rm -f "$TICKET"
       return 1
+    fi
+    if [ $((waited % 20)) -eq 0 ]; then
+      echo "[electron-lock] $ROLE queued, position $(queue_position), current holder: $(sed -n 1p "$LOCK/owner" 2>/dev/null || echo none)" >&2
     fi
     sleep 2
     waited=$((waited + 2))

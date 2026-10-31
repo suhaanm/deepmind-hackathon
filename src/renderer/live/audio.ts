@@ -135,7 +135,6 @@ export class AudioPlayer implements AudioOutput {
       await addWorklet(ctx, PLAYBACK_WORKLET)
       const node = new AudioWorkletNode(ctx, 'alongside-player', { numberOfInputs: 0, outputChannelCount: [1] })
       node.port.onmessage = (ev: MessageEvent<{ rms?: number; idle?: boolean }>) => {
-        if (typeof ev.data.rms === 'number') this.dbgMaxRms = Math.max(this.dbgMaxRms, ev.data.rms) // TEMP-VOICE-DEBUG
         if (typeof ev.data.rms === 'number') this.levelValue = Math.max(Math.min(1, ev.data.rms * 4), this.levelValue * 0.8)
         if (ev.data.idle) {
           this.playing = false
@@ -150,14 +149,8 @@ export class AudioPlayer implements AudioOutput {
     return this.ready
   }
 
-  private dbgBytes = 0 // TEMP-VOICE-DEBUG
-  private dbgChunks = 0 // TEMP-VOICE-DEBUG
-  private dbgMaxRms = 0 // TEMP-VOICE-DEBUG
-  private dbgTimer: ReturnType<typeof setInterval> | null = null // TEMP-VOICE-DEBUG
   play(base64Pcm16: string): void {
-    if (!this.node) { console.warn('[voicedbg] play() with NO node, dropped'); return }
-    this.dbgChunks++; this.dbgBytes += base64Pcm16.length * 0.75 // TEMP-VOICE-DEBUG
-    if (!this.dbgTimer) this.dbgTimer = setInterval(() => console.warn('[voicedbg]', JSON.stringify({ state: this.ctx?.state, t: this.ctx?.currentTime, sr: this.ctx?.sampleRate, chunks: this.dbgChunks, bytes: Math.round(this.dbgBytes), maxRms: this.dbgMaxRms, dest: this.ctx?.destination.channelCount })), 700) // TEMP-VOICE-DEBUG
+    if (!this.node) return
     const bytes = base64ToBytes(base64Pcm16)
     const i16 = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2))
     const f32 = new Float32Array(i16.length)
@@ -167,7 +160,6 @@ export class AudioPlayer implements AudioOutput {
   }
 
   flush(): void {
-    console.warn('[voicedbg] flush()', new Error().stack?.split('\n')[2]?.trim()) // TEMP-VOICE-DEBUG
     this.playing = false
     this.levelValue = 0
     this.node?.port.postMessage('interrupt')
