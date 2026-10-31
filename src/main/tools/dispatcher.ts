@@ -7,6 +7,7 @@ import type { ServiceContext } from '../context'
 import { createActuator, type Actuator } from '../actuator'
 import { createDoItForMe } from '../actuator/flow'
 import { createAgency, setAgency } from '../agency'
+import { createAxResolver } from '../agency/ax-resolver'
 import { FILE_DATA_NOTICE, wrapSnippet } from '../../shared/files'
 
 export type ToolSource = 'live' | 'debug'
@@ -19,6 +20,7 @@ type Handlers = { [N in LiveToolName]: (args: ToolArgs<N>) => Promise<ToolResult
 export function createDispatcher(ctx: ServiceContext, s: Services, confirm: ConfirmBroker, actuator: Actuator = createActuator({ log: ctx.log })): Dispatch {
   const doItForMe = createDoItForMe({ ctx, s, confirm, actuator })
   const agency = createAgency({ ctx, s, confirm, actuator })
+  const resolveAx = createAxResolver({ log: ctx.log })
   setAgency(agency)
   const handlers: Handlers = {
     async point_at({ target, step }) {
@@ -28,9 +30,18 @@ export function createDispatcher(ctx: ServiceContext, s: Services, confirm: Conf
       if (!res.found || !res.box) {
         return { found: false, confidence: res.confidence, note: res.reason ?? "I can't see that on the screen." }
       }
+      // Native apps: snap the ring to the exact Accessibility frame of the control the target names (vision is only
+      // good to ~+-20 points). No confident match keeps the vision box.
+      let box = res.box
+      if (resolveAx && !process.env.VITEST) {
+        const c = { x: (res.box.xmin + res.box.xmax) / 2, y: (res.box.ymin + res.box.ymax) / 2 }
+        const ax = await resolveAx(`${target} ${res.label ?? ''}`.trim(), c)
+        if (ax && ax.how === 'label') box = ax.box
+        if (process.env.ALONGSIDE_DEBUG === '1') ctx.log('point_at', `MEASURE vision=${JSON.stringify(res.box)} ax=${ax ? JSON.stringify({ how: ax.how, text: ax.text, box: ax.box }) : 'none'}`)
+      }
       s.overlay.show([
-        { id: 'point-ring', kind: 'ring', tone: 'guide', box: res.box, label: res.label ?? target, step },
-        { id: 'point-arrow', kind: 'arrow', tone: 'guide', to: res.box },
+        { id: 'point-ring', kind: 'ring', tone: 'guide', box, label: res.label ?? target, step },
+        { id: 'point-arrow', kind: 'arrow', tone: 'guide', to: box },
       ])
       return { found: true, confidence: res.confidence, note: res.label }
     },

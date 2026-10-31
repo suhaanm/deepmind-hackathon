@@ -22,7 +22,7 @@ export function listeningLightText(state: LightState, personaName: string): stri
     case 'screen':
       return 'I can see your screen'
     case 'blind':
-      return 'I can’t see your screen yet'
+      return 'Screen access needed'
     case 'muted':
       return 'Muted. I can’t hear you'
   }
@@ -47,7 +47,7 @@ export function ListeningLight({ phase, muted, personaName, screenBlocked = fals
       <span className="al-light__text">{text}</span>
       {state === 'blind' && onFixScreen ? (
         <button type="button" className="al-btn al-light__fix" onClick={onFixScreen}>
-          Fix
+          Open settings
         </button>
       ) : null}
     </div>

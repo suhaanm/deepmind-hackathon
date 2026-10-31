@@ -230,7 +230,7 @@ describe('grounder guardrails', () => {
   it('reads the preset from ALONGSIDE_GROUNDING_PRESET and exposes it', () => {
     expect(groundingPresetFromEnv({ ALONGSIDE_GROUNDING_PRESET: 'accurate' })).toBe('accurate')
     expect(groundingPresetFromEnv({ ALONGSIDE_GROUNDING_PRESET: 'fast' })).toBe('fast')
-    expect(groundingPresetFromEnv({})).toBe('fast')
+    expect(groundingPresetFromEnv({})).toBe('accurate')
     const { ai } = fakeAi(() => found([100, 100, 150, 300]))
     expect(createGrounder(testDeps(ai), { preset: 'accurate' }).preset).toBe('accurate')
   })

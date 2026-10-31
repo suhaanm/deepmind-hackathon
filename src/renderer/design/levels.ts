@@ -19,3 +19,11 @@ export const LEVEL_BLURBS: Readonly<Record<HelpLevelId, string>> = {
 
 // How much of the ladder is "support" at each level: drives the chip's draining bars.
 export const LEVEL_SUPPORT: Readonly<Record<HelpLevelId, number>> = { 1: 4, 2: 3, 3: 2, 4: 1 };
+
+// Plain, short words for what the learner sees. LEVEL_NAMES stay in aria-labels and state.
+export const LEVEL_SHORT: Readonly<Record<HelpLevelId, string>> = {
+  1: 'Showing',
+  2: 'Guided',
+  3: 'Nudges',
+  4: 'On my own',
+};

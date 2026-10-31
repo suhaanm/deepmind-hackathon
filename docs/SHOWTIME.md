@@ -2,6 +2,10 @@
 
 Showtime plays a hard-coded, timed tour of Alongside on the built-in practice desktop (`apps/demo-stage`). It drives the real app (real dock, real overlay, real level chip, real confirmation modal), so what you see is the product, not a video. It is meant for the demo and for first-time visitors.
 
+## What Showtime is, and is not
+
+Showtime is scripted and runs on the built-in **practice desktop**, a fake desktop window (`apps/demo-stage`) that Showtime opens fullscreen. It does NOT drive the real macOS desktop, a real Calculator or a real browser window: the rings, clicks and highlights land on the practice desktop's own elements. There is no real-macOS Showtime mode in this build. The real-macOS demo is the normal product, used by voice or chat: say the helper's name (or use Type instead) and ask for help with whatever is really on your screen. The in-app badge reads "Scripted walkthrough on a practice desktop" for this reason.
+
 ## Start and stop
 
 - Menu bar item: "Run the demo walkthrough" (it says "Stop the demo walkthrough" while the tour is active). Emits the bus event `showtime:request`.
@@ -17,7 +21,7 @@ Showtime plays a hard-coded, timed tour of Alongside on the built-in practice de
 | `scripted` (default) | Fixed timings. Highlight and ring boxes come from the stage's own ground truth (`__stage.rects()`), the scam report and the file search result are recorded fixtures, the level change goes through the real level engine. | none |
 | `live` (`ALONGSIDE_SHOWTIME_MODE=live` or `start({mode:'live'})`) | The scam check runs the real analyst on the stage message text; the file search runs the real `search_files` tool. Everything else is still scripted. | yes |
 
-A discreet "Scripted walkthrough" badge shows at the top right of the screen in scripted mode. `ALONGSIDE_SHOWTIME_BADGE=0` hides it. The roadmap strip (chapter dots, current chapter, one-line caption, progress bar) shows at the top left.
+A discreet "Scripted walkthrough on a practice desktop" badge shows at the top right of the screen in scripted mode. `ALONGSIDE_SHOWTIME_BADGE=0` hides it. The roadmap strip (chapter dots, current chapter, one-line caption, progress bar) shows at the top left.
 
 After the last chapter the app is back to normal live mode with your real profile and settings, and the practice desktop stays up for questions until you press Stop.
 
@@ -43,4 +47,6 @@ Pre-rendered clips live in `assets/showtime/clips/<id>.wav` with a `manifest.jso
 
 Verified by unit tests (`npx vitest run src/main/showtime src/renderer/overlay/annotations src/renderer/dock/showtime-cues.test.ts`): script timing and narration slots, the machine (pause, next, prev, stop, skipping, failing actions), the service lifecycle (start, stop, hand-over, profile backup and restore, stage open failure, cancel while opening, badge and mode switches, bus requests from the tray, dock Stop), the driver actions against fakes, the roadmap view-model and the dock cue mapping. `npm run typecheck` and `npm run build` are green.
 
-Not verified: a real Electron run of the tour (the stage window, synthetic clicks, audio playback, the roadmap strip and control bar on screen), the Stop box position (an estimate from the dock geometry), and narration audio (no clips have been rendered, so the tour is captions only).
+Real Electron (MAC-A, `docs/reports/MAC_A.md`, before the 15:04 fixes): the tour started from the tray, ran chapters 1 to 11 of 11 in about 150 s and Stop worked. It also found that the practice desktop stopped showing in captures after about 40 s, that the control bar covered the dock header, and that agency, captions and doItForMe stayed changed after Stop. Fixes for those were made afterwards and have not been re-run on a Mac.
+
+Not verified: a real Electron run after those fixes, audio playback, the Stop box position (an estimate from the dock geometry), and narration audio (no clips have been rendered, so the tour is captions only).

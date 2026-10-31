@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import type { HelpLevel } from '../../shared/protocol'
 import { Icon } from './icons'
-import { LEVEL_NAMES, LEVEL_SUPPORT } from './levels'
+import { LEVEL_NAMES, LEVEL_SHORT, LEVEL_SUPPORT } from './levels'
 
 export interface LevelChipProps {
   level: HelpLevel
   locked?: boolean
-  variant?: 'default' | 'compact' | 'hero'
+  variant?: 'default' | 'compact' | 'hero' | 'dots'
 }
 
 interface Word {
@@ -16,7 +16,7 @@ interface Word {
 }
 
 /**
- * The Help Ladder made visible: four bars that drain as the learner takes over, with the level name sliding to the next.
+ * The Help Ladder made visible: four quiet dots that empty as the learner takes over, with the level name sliding to the next.
  * Hero variant is sized to be read from five metres away.
  */
 export function LevelChip({ level, locked = false, variant = 'default' }: LevelChipProps): ReactElement {
@@ -40,7 +40,7 @@ export function LevelChip({ level, locked = false, variant = 'default' }: LevelC
   }, [level])
 
   const name = LEVEL_NAMES[level]
-  const className = `al-level${variant === 'compact' ? ' al-level--compact' : ''}${variant === 'hero' ? ' al-level--hero' : ''}`
+  const className = `al-level${variant === 'compact' ? ' al-level--compact' : ''}${variant === 'hero' ? ' al-level--hero' : ''}${variant === 'dots' ? ' al-level--dots' : ''}`
   const deltaText = change === 'less' ? 'Less help. You’re leading.' : 'More help, as you asked.'
 
   return (
@@ -55,7 +55,7 @@ export function LevelChip({ level, locked = false, variant = 'default' }: LevelC
         <span className="al-level__name">
           {words.map((w) => (
             <span key={w.key} className={`al-level__word${w.state === 'in' ? ' is-entering' : ''}${w.state === 'out' ? ' is-leaving' : ''}`}>
-              {LEVEL_NAMES[w.level]}
+              {LEVEL_SHORT[w.level]}
             </span>
           ))}
         </span>

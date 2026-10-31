@@ -16,3 +16,9 @@ export function normToPoints(p: NormPoint, bounds: DisplayBounds): { x: number; 
 export function isValidNormPoint(p: NormPoint): boolean {
   return Number.isFinite(p.x) && Number.isFinite(p.y) && p.x >= 0 && p.x <= 1000 && p.y >= 0 && p.y <= 1000
 }
+
+// Inverse of normToPoints (global screen points -> NormPoint 0-1000, unrounded so an exact AX centre survives the round trip).
+export function pointsToNorm(p: { x: number; y: number }, bounds: DisplayBounds): NormPoint {
+  const c = (n: number): number => Math.min(1000, Math.max(0, n))
+  return { x: c(((p.x - bounds.x) / bounds.width) * 1000), y: c(((p.y - bounds.y) / bounds.height) * 1000) }
+}

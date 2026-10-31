@@ -25,7 +25,7 @@ export interface Windows {
 }
 
 const DOCK_SIZES: Record<DockMode, { width: number; height: number }> = {
-  compact: { width: 380, height: 80 },
+  compact: { width: 340, height: 68 },
   expanded: { width: 380, height: 620 },
 }
 const MARGIN = 16

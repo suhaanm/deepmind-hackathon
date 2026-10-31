@@ -10,7 +10,24 @@ export interface PillProps {
   onStop: () => void
 }
 
-/** Collapsed dock: orb with its listening dot, the level chip, and Stop. 72px tall. */
+const WORDS: Record<CompanionState['phase'], string> = {
+  asleep: 'Resting',
+  listening_for_name: 'Ready',
+  connecting: 'Starting',
+  live: 'Listening',
+  speaking: 'Speaking',
+  thinking: 'Thinking',
+  error: 'Tap for details',
+}
+
+/** One short word for the pill. Honest about the mic and about Screen Recording. */
+export function pillWord(phase: CompanionState['phase'], muted: boolean, screenBlocked: boolean): string {
+  if (muted) return 'Muted'
+  if (screenBlocked && sessionActive(phase)) return 'Screen access needed'
+  return WORDS[phase]
+}
+
+/** Collapsed dock: the orb, one state word, four quiet dots for the help level, and Stop only while something is running. */
 export function Pill({ state, personaName, onExpand, onStop }: PillProps): ReactElement {
   const screenBlocked = useScreenBlocked()
   const demoActive = useShowtimeActive()
@@ -18,19 +35,12 @@ export function Pill({ state, personaName, onExpand, onStop }: PillProps): React
   const light = state.settings.listeningLight ? listeningLightState(state.phase, state.micMuted, screenBlocked) : undefined
   return (
     <div className="al-pill al-drag" role="region" aria-label={`${personaName}, collapsed`}>
-      <span className="al-grip" aria-hidden="true" title="Drag to move">
-        <span /><span /><span /><span /><span /><span />
-      </span>
       <button type="button" className="al-pill__main" aria-label={`Open the ${personaName} panel`} onClick={onExpand}>
-        <PresenceOrb phase={state.phase} size={48} personaName={personaName} light={light} />
-        {state.phase === 'error' ? (
-          <span className="al-pill__who">
-            <span className="al-pill__name">Something went wrong</span>
-            <span className="al-pill__phase">Tap for details</span>
-          </span>
-        ) : (
-          <LevelChip level={state.level} locked={state.levelLocked} variant="compact" />
-        )}
+        <PresenceOrb phase={state.phase} size={36} personaName={personaName} light={light} />
+        <span className="al-pill__who">
+          <span className="al-pill__phase">{pillWord(state.phase, state.micMuted, screenBlocked)}</span>
+        </span>
+        {state.phase === 'error' ? null : <LevelChip level={state.level} locked={state.levelLocked} variant="dots" />}
       </button>
       {stoppable ? <StopButton compact onStop={onStop} /> : null}
     </div>

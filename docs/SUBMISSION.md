@@ -16,7 +16,7 @@ We submit a **GitHub repository**: `https://github.com/suhaanm/deepmind-hackatho
 | 4 | **No secrets anywhere in history** | Run the scan below: it must print `0` |
 | 5 | **`.env.example` has no real key** | `grep '^GEMINI_API_KEY=' .env.example` shows an empty value |
 | 6 | **Builds and tests pass from a clean clone** | In a fresh folder: `git clone <repo> && cd deepmind-hackathon && npm install && npm run typecheck && npm test && npm run build` |
-| 7 | **Licence file** exists | `ls LICENSE`; the team picks a licence (open point: README says `LICENSE TBD (user to confirm)`). See "Licence" below |
+| 7 | **Licence** stated honestly | No `LICENSE` file, by the user's decision; README says all rights reserved, licence to be decided by the authors. Check the README does not claim a licence. See "Licence" below |
 | 8 | **Third-party notices** complete | `THIRD_PARTY_NOTICES.md` lists every `Adapted from` file (check: `grep -rn "Adapted from" src apps scripts`; 16 files at 14:50 GMT: 11 from farzaa/clicky including `src/main/agency/policy.ts` and `audit.ts`, 5 from the Gemini Live example); Sentient OS (AGPL) is listed as "not used" (`grep -ri sentient src` prints nothing). `npm run submit-check` runs the same coverage check |
 | 9 | **Team names** in the README | The README has a Team line; confirm every member is named (open point: names not yet supplied to DOCS) |
 | 10 | **Demo video fallback recorded** (60-90 s, with sound) | Recorded with `ALONGSIDE_OVERLAY_CAPTURABLE=1 npm run dev` so arrows show; plays from the presenting laptop and the second laptop; link it in the README or the form if the event allows |
@@ -80,7 +80,7 @@ If the push is rejected (someone pushed from another machine): `git fetch origin
 
 ## Licence
 
-Our own licence is an open decision for the user (`LICENSE TBD (user to confirm)`); DOCS has deliberately not added a `LICENSE` file. Constraints: we adapted MIT code from Clicky (keep its notice, done in `THIRD_PARTY_NOTICES.md`), we reused Google's example code (that repository has **no LICENSE file**, so say so, as the notices file does), and we took **nothing** from Sentient OS (AGPL-3.0), so we are free to choose. **MIT is the simplest choice**, because the code we adapted is MIT; Apache-2.0 would also be compatible with everything we included. Also check the hackathon's own IP or licence terms for submissions (the Luma page listed none). Then:
+**Decision (user): there is no `LICENSE` file.** The README says "all rights reserved; licence to be decided by the authors" and never claims an open-source licence; `npm run submit-check` shows a LICENSE WARN, which is expected. The notes below only apply if the authors later choose a licence. Constraints: we adapted MIT code from Clicky (keep its notice, done in `THIRD_PARTY_NOTICES.md`), we reused Google's example code (that repository has **no LICENSE file**, so say so, as the notices file does), and we took **nothing** from Sentient OS (AGPL-3.0), so we are free to choose. **MIT is the simplest choice**, because the code we adapted is MIT; Apache-2.0 would also be compatible with everything we included. Also check the hackathon's own IP or licence terms for submissions (the Luma page listed none). Then:
 
 ```bash
 # example for MIT: copy the standard text into LICENSE with the right year and holders

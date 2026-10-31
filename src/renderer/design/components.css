@@ -1795,3 +1795,524 @@
 :root[data-motion='reduced'] .al-level__word.is-leaving {
   display: none;
 }
+
+/* =====================================================================================================
+ * v3 premium pass: restraint over decoration. One calm accent, hairline borders, soft layered shadows,
+ * frosted glass with an inner highlight. Overrides the earlier rules above on purpose; colour tokens untouched.
+ * ===================================================================================================== */
+:root {
+  --v3-hair: color-mix(in srgb, var(--ink) 11%, transparent);
+  --v3-hair-strong: color-mix(in srgb, var(--ink) 18%, transparent);
+  --v3-hilite: rgba(255, 255, 255, 0.55);
+  --v3-radius: 24px;
+}
+:root[data-theme='dark'] {
+  --v3-hilite: rgba(255, 255, 255, 0.09);
+  --v3-hair: color-mix(in srgb, #fff 12%, transparent);
+  --v3-hair-strong: color-mix(in srgb, #fff 20%, transparent);
+}
+:root[data-high-contrast='true'] {
+  --v3-hair: var(--line-strong);
+  --v3-hair-strong: var(--ink);
+  --v3-hilite: transparent;
+}
+
+/* the shell */
+.al-dock {
+  border: 1px solid var(--v3-hair-strong);
+  border-radius: var(--v3-radius);
+  box-shadow: inset 0 1px 0 var(--v3-hilite), inset 0 0 0 1px color-mix(in srgb, var(--v3-hilite) 40%, transparent), 0 1px 2px rgba(20, 15, 10, 0.1), 0 10px 30px rgba(20, 15, 10, 0.14);
+}
+.al-dock--fill {
+  box-shadow: inset 0 1px 0 var(--v3-hilite);
+}
+:root[data-glass='true'] .al-dock {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  border-color: var(--v3-hair-strong);
+}
+
+/* header */
+.al-dock__head {
+  padding: var(--sp-3) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-bottom: 0;
+}
+.al-dock__headrow {
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+}
+.al-dock__who {
+  min-width: 0;
+}
+.al-dock__who .al-pill__name {
+  font-size: calc(var(--fs-base) * 1.05);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.al-dock__headrow .al-btn {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-muted);
+}
+.al-dock__headrow .al-btn:hover {
+  background: var(--v3-hair);
+  color: var(--ink);
+}
+.al-dock__headrow .al-mute[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+/* tabs: three words, a soft capsule marks where you are */
+.al-tabs {
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin: 0 var(--sp-4) var(--sp-2);
+  padding: 3px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--v3-hair);
+}
+.al-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.al-tab[aria-selected='true'] {
+  border: 0;
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(20, 15, 10, 0.16), 0 0 0 1px var(--v3-hair);
+}
+.al-tab:hover {
+  background: transparent;
+  color: var(--ink);
+}
+.al-tab[aria-selected='true']:hover {
+  background: var(--surface-raised);
+}
+:root[data-high-contrast='true'] .al-tab[aria-selected='true'] {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+:root[data-dyslexia-font='true'] .al-tab {
+  font-size: calc(var(--fs-sm) * 0.85);
+  padding: 0 2px;
+}
+.al-dock__body {
+  background: transparent;
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+  gap: var(--sp-4);
+}
+:root:not([data-glass='true']) .al-dock__body {
+  background: transparent;
+}
+.al-back,
+.al-row-link {
+  align-self: flex-start;
+}
+.al-back {
+  min-height: 36px;
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+  border-radius: var(--r-pill);
+}
+.al-back .al-icon {
+  transform: rotate(-90deg);
+}
+.al-row-link {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--v3-hair);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.al-row-link .al-icon {
+  transform: rotate(-90deg);
+  color: var(--ink-muted);
+}
+
+/* footer: one quiet line, no box */
+.al-dock__foot {
+  flex-wrap: nowrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3) var(--sp-4);
+  border-top: 0;
+  background: transparent;
+}
+.al-dock__foot .al-light,
+.al-light {
+  min-height: 36px;
+  padding: 0;
+  gap: var(--sp-2);
+  border: 0;
+  background: transparent;
+  font-size: calc(var(--fs-sm) * 0.95);
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+.al-light:not(:has(.al-light__mute)) {
+  padding: 0;
+}
+.al-light__dot {
+  width: 9px;
+  height: 9px;
+}
+.al-light__text {
+  flex: 1 1 auto;
+}
+.al-light__fix {
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  font-size: calc(var(--fs-sm) * 0.9);
+}
+.al-stop {
+  min-height: 36px;
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-pill);
+  font-size: calc(var(--fs-sm) * 0.95);
+  font-weight: 600;
+}
+.al-stop--compact {
+  min-height: 34px;
+  padding: 0 var(--sp-3);
+}
+
+/* the pill: small, quiet */
+.al-pill {
+  height: 100%;
+  min-height: 0;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+}
+.al-pill__main {
+  gap: var(--sp-3);
+  min-height: 48px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-pill);
+}
+.al-pill__main:hover {
+  background: var(--v3-hair);
+}
+.al-pill__who {
+  flex: 1 1 auto;
+  gap: 1px;
+}
+.al-pill__name {
+  font-size: calc(var(--fs-sm) * 0.98);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.al-pill__phase {
+  font-size: calc(var(--fs-sm) * 0.82);
+}
+.al-grip {
+  display: none;
+}
+
+/* help level: four quiet dots and one plain word; no bars, no border, no kicker */
+.al-level,
+.al-level--compact,
+.al-level--dots {
+  --level-bar: 6px;
+  gap: 8px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-muted);
+}
+.al-level__bars {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.al-level__bar,
+.al-level__bar:nth-child(n) {
+  width: 6px;
+  height: 6px;
+  min-height: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 38%, transparent);
+  transform: none;
+}
+.al-level__bar[data-on='true'],
+.al-level__bar[data-on='true']:nth-child(n) {
+  background: var(--accent);
+  box-shadow: none;
+}
+.al-level:not(.al-level--hero) .al-level__kicker,
+.al-level:not(.al-level--hero) .al-level__delta,
+.al-level:not(.al-level--hero) .al-level__locktext {
+  display: none;
+}
+.al-level--dots .al-level__text {
+  display: none;
+}
+.al-level:not(.al-level--hero)::after {
+  display: none;
+}
+.al-level--compact .al-level__name,
+.al-level__name {
+  font-size: calc(var(--fs-sm) * 0.92);
+  font-weight: 500;
+}
+.al-level--hero {
+  padding: var(--sp-3) var(--sp-5);
+  border: 1px solid var(--v3-hair);
+  border-radius: var(--r-pill);
+  background: var(--surface-raised);
+}
+
+/* chat */
+.al-dock__body--chat {
+  padding: 0 var(--sp-4) var(--sp-3);
+}
+.al-chat {
+  gap: var(--sp-2);
+}
+.al-chat__top {
+  flex-wrap: nowrap;
+  justify-content: space-between;
+  padding-top: var(--sp-1);
+}
+.al-chat__top .al-seg {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--v3-hair);
+}
+.al-chat__top .al-seg__btn,
+.al-seg__btn {
+  min-height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  font-size: calc(var(--fs-sm) * 0.9);
+  font-weight: 600;
+}
+.al-chat__top .al-seg__btn[aria-pressed='true'],
+.al-seg__btn[aria-pressed='true'],
+.al-seg__btn[aria-checked='true'] {
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(20, 15, 10, 0.16), 0 0 0 1px var(--v3-hair);
+}
+.al-seg {
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--v3-hair);
+}
+.al-chat__top .al-level {
+  flex: 0 1 auto;
+  margin-right: var(--sp-1);
+}
+.al-thread {
+  gap: var(--sp-3);
+  padding: var(--sp-2) 2px;
+}
+.al-bubble {
+  max-width: 90%;
+  padding: 12px 16px;
+  border-radius: 22px;
+  font-size: var(--fs-base);
+  line-height: 1.38;
+}
+.al-bubble[data-role='assistant'] {
+  border: 1px solid var(--v3-hair);
+  border-bottom-left-radius: 8px;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 2px rgba(20, 15, 10, 0.06);
+}
+.al-bubble[data-role='user'] {
+  border-bottom-right-radius: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, #fff), var(--accent));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.al-empty {
+  gap: var(--sp-4);
+}
+.al-composer {
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 4px 4px var(--sp-4);
+  border: 1px solid var(--v3-hair-strong);
+  border-radius: var(--r-pill);
+  background: var(--surface-raised);
+}
+.al-composer .al-input {
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.al-composer .al-input:focus-visible {
+  outline: none;
+}
+.al-composer:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.al-composer .al-btn {
+  min-height: 40px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-radius: var(--r-pill);
+}
+
+/* groups and cards in progress / settings: hairlines, not heavy outlines */
+.al-group {
+  border: 1px solid var(--v3-hair);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--surface-raised) 70%, transparent);
+}
+
+/* approval: one line, text and two small buttons */
+.al-confirmbar {
+  flex-wrap: nowrap;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--v3-hair-strong);
+  background: var(--surface);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.8);
+}
+.al-confirmbar__q {
+  flex: 1 1 auto;
+  font-size: calc(var(--fs-sm) * 0.95);
+  font-weight: 600;
+  line-height: 1.25;
+}
+.al-confirmbar .al-btn {
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-pill);
+  font-size: calc(var(--fs-sm) * 0.95);
+}
+.al-confirmbar__choices {
+  flex: none;
+}
+
+/* text size and dyslexia font must never break the 380 px dock */
+:root[data-dyslexia-font='true'] .al-bubble,
+:root[data-dyslexia-font='true'] .al-pill__main {
+  letter-spacing: 0;
+  word-spacing: 0;
+}
+:root[data-dyslexia-font='true'] .al-dock__who .al-pill__name {
+  font-size: var(--fs-sm);
+}
+.al-level__bars {
+  flex-direction: row;
+  width: auto;
+}
+.al-orbwrap__light {
+  right: -2px;
+  bottom: -2px;
+  width: 13px;
+  height: 13px;
+  border-width: 2px;
+}
+.al-orbwrap__light::after {
+  inset: -4px;
+}
+
+/* chrome (pill, tabs, header, footer) scales a little with text size but never enough to break 380 px; content scales fully */
+:root {
+  --cs: min(var(--ui-scale), 1.15);
+}
+.al-pill__phase {
+  font-size: calc(15px * var(--cs));
+  font-weight: 600;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.al-pill__who {
+  gap: 0;
+}
+.al-tab {
+  font-size: calc(14.5px * var(--cs));
+}
+:root[data-dyslexia-font='true'] .al-tab {
+  font-size: calc(13px * var(--cs));
+}
+.al-dock__who .al-pill__name,
+:root[data-dyslexia-font='true'] .al-dock__who .al-pill__name {
+  font-size: calc(17px * var(--cs));
+}
+.al-chat__top .al-seg__btn,
+.al-seg__btn {
+  font-size: calc(14px * var(--cs));
+}
+.al-level--compact .al-level__name,
+.al-level__name {
+  font-size: calc(14px * var(--cs));
+}
+.al-light,
+.al-stop,
+.al-light__fix {
+  font-size: calc(14px * var(--cs));
+}
+.al-dock__foot {
+  flex-wrap: wrap;
+}
+.al-confirmbar__q,
+.al-confirmbar .al-btn {
+  font-size: calc(14px * var(--cs));
+}
+.al-confirmbar {
+  flex-wrap: wrap;
+}
+
+/* selected chip and quiet tab text read the same in light, dark and glass */
+:root {
+  --v3-chip: #ffffff;
+  --v3-tabink: color-mix(in srgb, var(--ink) 78%, transparent);
+}
+:root[data-theme='dark'] {
+  --v3-chip: rgba(255, 255, 255, 0.17);
+}
+:root[data-high-contrast='true'] {
+  --v3-chip: var(--surface-raised);
+  --v3-tabink: var(--ink);
+}
+.al-tab {
+  color: var(--v3-tabink);
+}
+.al-tab[aria-selected='true'],
+.al-tab[aria-selected='true']:hover,
+.al-chat__top .al-seg__btn[aria-pressed='true'],
+.al-seg__btn[aria-pressed='true'],
+.al-seg__btn[aria-checked='true'] {
+  background: var(--v3-chip);
+  color: var(--ink);
+}

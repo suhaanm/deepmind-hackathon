@@ -30,6 +30,7 @@ import {
   type AgencyDeps,
   type Situation,
 } from './common'
+import type { AxResolve } from './ax-resolver'
 import { proposeNext, type Proposal, type ProposeRequest, type ProposedStep } from './computer-use'
 import { ActionLimiter, evaluateAction, evaluateGoal, MAX_ACTIONS_PER_TASK, type ProposedAction } from './policy'
 import type { DoneForMeSink } from './open-for-me'
@@ -51,6 +52,8 @@ export interface ActOptions {
   propose?: (req: ProposeRequest) => Promise<Proposal>
   // Where the pointer is now (normalised); the ghost cursor starts there.
   cursor?: () => NormPoint | null
+  // Accessibility-first resolver: re-run right before each click/double-click; null = keep the vision coordinates.
+  resolveAx?: AxResolve
 }
 
 const hashOf = (shot: Shot): string => createHash('sha1').update(shot.jpegBase64).digest('hex')
@@ -299,6 +302,24 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
         await audit({ decision: 'refused', ok: false, code: recheck.code, label: oneLine(action.kind, 20), step: done })
         return result(recheck.code, false, false, recheck.reason, { steps: done })
       }
+      // Re-ground right before the click: the model's coordinates (0-999 on a whole-screen shot) are only good to about
+      // +-20 points, more than half a calculator key. Ask Accessibility for the exact frame of the thing the model named.
+      let target: ProposedStep = step
+      if (opts.resolveAx && step.point && (step.tool === 'click' || step.tool === 'double_click')) {
+        const ax = await opts.resolveAx(`${step.intent} ${step.safety?.explanation ?? ''}`.trim(), step.point)
+        if (ax) {
+          // The denylist and policy apply to the words of the element that will really be hit, too.
+          const axAction: ProposedAction = { ...action, targetText: [action.targetText, ax.text].filter(Boolean).join(' ') }
+          const axDecision = evaluateAction(axAction, policyContext(deps, sit, planApproved))
+          if (!axDecision.allowed) {
+            clearScreen()
+            await audit({ decision: 'blocked', ok: false, code: axDecision.code, label: oneLine(action.kind, 20), step: done })
+            return result(axDecision.code, false, false, `${axDecision.reason} Steps done so far: ${done}.`, { steps: done, label: oneLine(ax.text, 60) })
+          }
+          target = { ...step, point: ax.point }
+          safely(ctx, 'overlay', () => s.overlay.show([{ id: RING_ID, kind: 'ring', tone: 'guide', box: boxAroundPoint(ax.point, 30), label: oneLine(what, 40), ttlMs: GHOST_TTL_MS }]))
+        }
+      }
       for (let tries = 0; ; tries++) {
         const slot = limiter.take(now())
         if (slot.ok) break
@@ -311,7 +332,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
         if (stopped()) return stopResult(done)
       }
 
-      const r = await perform(step)
+      const r = await perform(target)
       if (!r.ok) {
         clearScreen()
         const noAx = r.reason === 'accessibility'
@@ -336,9 +357,10 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       unchanged = changed ? 0 : unchanged + 1
       history.push(`${what} -> ${changed ? 'the screen changed' : 'no visible change'}`)
       if (spot) safely(ctx, 'overlay', () => s.overlay.show([{ id: TICK_ID, kind: 'tick', tone: changed ? 'success' : 'warn', box: boxAroundPoint(spot, 30), ok: changed, ttlMs: 1500 }]))
-      if (unchanged >= 2) {
+      // A click that changed nothing means it probably missed: stop at once instead of clicking on (keys/scroll get one more try).
+      if (unchanged >= (step.tool === 'click' || step.tool === 'double_click' ? 1 : 2)) {
         await audit({ decision: 'allowed', ok: false, code: 'gave_up', label: 'no effect', step: done })
-        return result('gave_up', true, false, 'Nothing on the screen changed after two steps, so I stopped. Nothing was retried. Show the learner instead.', { steps: done })
+        return result('gave_up', true, false, 'Nothing on the screen changed after a step, so I stopped. Nothing was retried. Show the learner instead.', { steps: done })
       }
       carry = after
     }

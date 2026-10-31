@@ -235,8 +235,8 @@
 :root[data-dyslexia-font='true'] {
   --font-ui: 'OpenDyslexic', 'Atkinson Hyperlegible', system-ui, sans-serif;
   --lh-body: 1.7;
-  --ls-body: 0.03em;
-  --ws-body: 0.12em;
+  --ls-body: 0.01em;
+  --ws-body: 0.06em;
   --fw-body: 400;
 }
 

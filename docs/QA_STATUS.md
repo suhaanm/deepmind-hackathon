@@ -8,7 +8,21 @@ How to run: `npm run e2e` (mock, headless, ~25 s) | `npm run e2e -- --mode real 
 
 The debug HTTP server (127.0.0.1:7777: `/shot`, `/state`, `/tool`, `/settings`, no auth) used to start in every unpackaged build. It now starts only when `ALONGSIDE_DEBUG=1` (`src/main/index.ts`). `scripts/electron-lock.sh` and `tests/e2e/run.mjs` export it (so e2e, preflight probe and every agent harness that goes through the lock keep working); `scripts/demo.sh` does not, so a stage launch has no debug surface. Consequence for the demo laptop: `curl 127.0.0.1:7777/shot` only works if you deliberately launch with `ALONGSIDE_DEBUG=1 npm run dev` (noted in `docs/MANUAL_TESTS.md`). `preflight`'s "Alongside already running" row cannot see a normal demo instance any more (it probes `/health`); harmless.
 
-## Quality gate
+## Final regression (freeze, run 15:23-15:26 GMT; supersedes the table below)
+
+Evidence class: unit tests, build and static checks only. Anything run against the stage is a "practice-desktop test", not product evidence. No real-macOS pointing/agency run by QA (the Electron lock was held by MAC-C, PTR, UIX and VIDEO the whole window); real clicks are dry-run verified only.
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | PASS (node + web) |
+| `npx vitest run` | 1 FAILED, 1393 passed, 27 skipped (74 files passed, 1 failed, 7 skipped). Failure: `tests/agency/act-for-me.test.ts:194` "two unchanged screens in a row: gave_up" expects `steps: 2`, got `steps: 1` (deterministic, 2 runs). Routed to @AGENCY on bus.md. |
+| `npm run build` | PASS |
+| Secrets scan (`AIza` + 30 chars, whole repo incl. untracked, `.env` excluded, nothing printed) | 0 files |
+| `node scripts/submit-check.mjs` | PASS 10, WARN 3, FAIL 1. FAIL is the vitest row above. WARN: LICENSE missing (accepted by user), repo PRIVATE, showtime `clips/` empty. |
+| `node scripts/preflight.mjs` (2 runs) | Network rows all OK: key, 60 models visible, p50 43 ms, Live smoke (connect 890 ms, audio 376 ms), wake token. WARN: persona voices TBD for marcus, amelia; demo seed not applied to `~/.alongside-demo`. 4 FAIL rows (Screen Recording, real screen grab, Microphone, global hotkeys) are "not checked: another Electron instance holds the lock", NOT permission failures. Those must be re-run on the demo laptop from the stage terminal. |
+| Live API calls by QA | about 12 (two preflights) |
+
+## Quality gate (earlier, 14:45-14:50)
 
 | Gate | Result | Last run |
 |---|---|---|

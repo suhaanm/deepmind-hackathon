@@ -64,7 +64,16 @@ async function electronCursorNorm(): Promise<() => NormPoint | null> {
   }
 }
 
+// Guidance marks (point_at, lesson steps, do-it-for-me) are temporary: when the next anchor mark (ring, spotlight or
+// ghost cursor) with a new id arrives, the previous guidance fades out. Other sources (scam flags, Showtime) manage
+// their own marks. Batches go out in a fixed back-to-front order so layering never depends on call order.
+const GUIDANCE_PREFIXES = ['point-', 'runner-', 'dfm-']
+const ANCHOR_KINDS = new Set(['ring', 'spotlight', 'ghostCursor'])
+const Z_ORDER: Record<string, number> = { spotlight: 0, highlightText: 1, ring: 2, arrow: 3, badge: 4, bubble: 5, tick: 6, ghostCursor: 7 }
+const isGuidance = (id: string): boolean => GUIDANCE_PREFIXES.some((p) => id.startsWith(p))
+
 export function createOverlayController(ctx: ServiceContext, deps: OverlayControllerDeps = {}): OverlayController {
+  const shownGuidance = new Set<string>()
   let cursorNorm = deps.cursorNorm ?? (() => null)
   if (!deps.cursorNorm && process.versions.electron) {
     void electronCursorNorm().then((fn) => {
@@ -88,9 +97,24 @@ export function createOverlayController(ctx: ServiceContext, deps: OverlayContro
         }
         clean.push(s)
       }
-      if (clean.length > 0) ctx.sendOverlay({ type: 'show', annotations: clean })
+      if (clean.length === 0) return
+      const incoming = new Set(clean.map((a) => a.id))
+      const newAnchor = clean.some((a) => isGuidance(a.id) && ANCHOR_KINDS.has(a.kind) && !shownGuidance.has(a.id))
+      if (newAnchor) {
+        const stale = [...shownGuidance].filter((id) => !incoming.has(id))
+        if (stale.length > 0) ctx.sendOverlay({ type: 'clear', ids: stale })
+        shownGuidance.clear()
+      }
+      // Ticks expire on their own (3.5 s) and must stay visible when the next step's ring arrives straight after them.
+      for (const a of clean) if (isGuidance(a.id) && a.kind !== 'tick') shownGuidance.add(a.id)
+      clean.sort((a, b) => (Z_ORDER[a.kind] ?? 9) - (Z_ORDER[b.kind] ?? 9))
+      ctx.sendOverlay({ type: 'show', annotations: clean })
     },
-    clear: (ids) => ctx.sendOverlay({ type: 'clear', ids }),
+    clear: (ids) => {
+      if (!ids) shownGuidance.clear()
+      else for (const id of ids) shownGuidance.delete(id)
+      ctx.sendOverlay({ type: 'clear', ids })
+    },
     caption: (speaker, text, final) => ctx.sendOverlay({ type: 'caption', speaker, text, final }),
     chip: (level, label) => ctx.sendOverlay({ type: 'chip', level, label }),
   }

@@ -13,7 +13,7 @@ describe('flow state machine', () => {
     const s = fresh()
     expect(stepId(s)).toBe('hello')
     expect(canGoBack(s)).toBe(false)
-    expect(s.answers).toMatchObject({ userName: '', topics: [], comfort: null, pacing: 'gentle', glass: false, agency: 'off', filesEnabled: false, persona: 'marcus' })
+    expect(s.answers).toMatchObject({ userName: '', topics: [], comfort: null, pacing: 'gentle', glass: true, agency: 'off', filesEnabled: false, persona: 'marcus' })
     expect(s.touched).toEqual({})
   })
 

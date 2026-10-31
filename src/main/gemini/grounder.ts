@@ -86,9 +86,9 @@ interface Interim {
   current: GroundResult | null
 }
 
-/** Reads ALONGSIDE_GROUNDING_PRESET=fast|accurate (anything else -> fast). */
+/** Reads ALONGSIDE_GROUNDING_PRESET=fast|accurate (anything else -> accurate: flash-first, fewer wrong-button picks). */
 export function groundingPresetFromEnv(env: Record<string, string | undefined> = process.env): GroundPreset {
-  return env.ALONGSIDE_GROUNDING_PRESET === 'accurate' ? 'accurate' : 'fast'
+  return env.ALONGSIDE_GROUNDING_PRESET === 'fast' ? 'fast' : 'accurate'
 }
 
 /** Short ring label: the model's own words when sensible, else the target phrase trimmed of filler. */

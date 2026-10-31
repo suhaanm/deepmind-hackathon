@@ -17,7 +17,7 @@ export function glassAlphas(opacity: number): { shell: number; card: number } {
 }
 
 const osPrefersDark = (): boolean => window.matchMedia('(prefers-color-scheme: dark)').matches
-const glassSupported = (): boolean => /Mac/i.test(navigator.platform || navigator.userAgent)
+const glassSupported = (): boolean => /Mac/i.test(navigator.platform || navigator.userAgent) && !window.matchMedia('(prefers-reduced-transparency: reduce)').matches
 
 /**
  * Mirrors the look-and-feel settings and the persona accent onto <html>, where tokens.css reads them.
@@ -32,7 +32,7 @@ export function applyDesignSettings(settings: DesignSettings, persona: PersonaId
   root.dataset.themeSetting = theme
   root.dataset.theme = theme === 'system' ? (osPrefersDark() ? 'dark' : 'light') : theme
 
-  const glass = (settings.glass ?? false) && !settings.highContrast && (opts.glassSupported ?? glassSupported())
+  const glass = (settings.glass ?? true) && !settings.highContrast && (opts.glassSupported ?? glassSupported())
   root.dataset.glass = String(glass)
   const { shell, card } = glassAlphas(settings.glassOpacity ?? 0.78)
   root.style.setProperty('--glass-shell', `${(shell * 100).toFixed(1)}%`)

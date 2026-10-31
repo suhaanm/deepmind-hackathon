@@ -4,7 +4,7 @@ import { listeningLightState, listeningLightText } from './ListeningLight'
 describe('listeningLightState with Screen Recording blocked', () => {
   it('never claims to see the screen while blocked', () => {
     expect(listeningLightState('live', false, true)).toBe('blind')
-    expect(listeningLightText('blind', 'Marcus')).toBe('I can’t see your screen yet')
+    expect(listeningLightText('blind', 'Marcus')).toBe('Screen access needed')
   })
   it('still says it can see the screen when allowed', () => {
     expect(listeningLightState('live', false, false)).toBe('screen')

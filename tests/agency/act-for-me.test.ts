@@ -187,13 +187,26 @@ describe('act_for_me', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('two unchanged screens in a row: gave_up', async () => {
-    const { env, act } = setup({}, [click(100, 100), click(200, 200), click(300, 300), finished()])
+  it('a click that changes nothing stops the task at once (it probably missed)', async () => {
+    const { env, act } = setup({}, [click(100, 100), click(200, 200), finished()])
+    env.shots.push(shot('SAME', 9e15), shot('SAME', 9e15))
+    const r = await act.run(GOAL)
+    expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 1 })
+    expect(r.reason).toMatch(/nothing on the screen changed/i)
+    expect(env.calls).toEqual(['click 100,100'])
+  })
+
+  it('keys or scroll that change nothing get one more try, then the task stops', async () => {
+    const { env, act } = setup({}, [
+      action({ tool: 'scroll', point: { x: 500, y: 500 }, dy: 5, intent: 'Scroll down' }),
+      action({ tool: 'keys', keys: 'tab', intent: 'Press tab' }),
+      action({ tool: 'keys', keys: 'space', intent: 'Press space' }),
+      finished(),
+    ])
     env.shots.push(shot('SAME', 9e15), shot('SAME', 9e15), shot('SAME', 9e15))
     const r = await act.run(GOAL)
     expect(r).toMatchObject({ done: false, code: 'gave_up', steps: 2 })
-    expect(r.reason).toMatch(/nothing on the screen changed/i)
-    expect(env.calls).toEqual(['click 100,100', 'click 200,200'])
+    expect(env.calls).toEqual(['scroll 500,500,5', 'keys tab'])
   })
 
   it('stops at 8 steps and never claims success', async () => {

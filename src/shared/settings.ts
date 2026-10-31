@@ -28,8 +28,8 @@ export const SettingsSchema = z.object({
   wakeEnabled: z.boolean().default(true),
   // Look and feel (DESIGN). `glass` makes the dock translucent; opacity is clamped so text stays readable.
   theme: z.enum(['system', 'light', 'dark']).default('system'),
-  glass: z.boolean().default(false),
-  glassOpacity: z.number().min(0.35).max(1).default(0.5),
+  glass: z.boolean().default(true),
+  glassOpacity: z.number().min(0.35).max(1).default(0.4),
   textScale: z.number().min(0.9).max(1.5).default(1),
   userName: z.string().max(60).default(''),
   onboardingDone: z.boolean().default(false),

@@ -3,6 +3,7 @@
 import type { AgencyResult } from '../../shared/protocol'
 import { geminiDeps } from '../gemini'
 import { createActForMe, type ActOptions } from './act-for-me'
+import { createAxResolver } from './ax-resolver'
 import { Situation, type AgencyDeps } from './common'
 import { createOpenForMe, type DoneForMeSink, type OpenArgs } from './open-for-me'
 import { ActionLimiter } from './policy'
@@ -32,6 +33,8 @@ export function createAgency(deps: AgencyDeps & { act?: Partial<ActOptions> }): 
     gemini: () => geminiDeps(deps.ctx, { capture: deps.s.capture }),
     loopEnabled: agencyLoopFromEnv,
     cursor: cursorFromElectron,
+    // Accessibility-first targets for native apps (exact element frames); off under unit tests, ALONGSIDE_AX_RESOLVER=0 disables it.
+    ...(process.env.VITEST ? {} : { resolveAx: createAxResolver({ log: deps.ctx.log }) }),
     ...deps.act,
   })
   return {

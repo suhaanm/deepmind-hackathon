@@ -14,6 +14,8 @@
 
 - MAC-A fixes (15:04): (1) driver teardown now restores EXACT prior settings (every key that differs from the pre-tour snapshot: agency, doItForMeAllowed, captions, persona, look-and-feel); per-chapter baselines still only undo the look-and-feel keys. Covered by driver tests. (2) stage window: `show()` and a 1 s keep-alive re-assert shown, always-on-top (floating, below the dock), all workspaces and simple fullscreen, and `moveTop()`; only the tour's own `hide()` (chapter 7) suspends it. Root cause of the ~40 s disappearance not reproduced (no Electron run here); the keep-alive is a defensive fix and is unverified on a real Mac.
 
+- Honest-docs path (15:2x): `docs/SHOWTIME.md` now states plainly that scripted Showtime uses the practice desktop and that the real-macOS demo is via voice/chat; badge text is "Scripted walkthrough on a practice desktop". A real-macOS Showtime mode was NOT built: it cannot be verified without an Electron run (launches refused in this session), so it stays out rather than shipping unverified.
+
 ## NEXT STEPS
 1. A real Electron run under `scripts/electron-lock.sh DEMO` with `ALONGSIDE_MOCK=1 ALONGSIDE_SHOWTIME_AUTOSTART=1 ALONGSIDE_USERDATA=<tmp>` (Electron launches were refused by the permission system in this session): check the stage window, synthetic clicks, roadmap strip, control bar overlap with the dock header, and the Stop ring position.
 2. Render narration clips (`assets/showtime/clips`, with `manifest.json`); currently none exist, so the tour is captions only. The narrator's stale-clip log mentions `npm run showtime:render`, which does not exist yet.

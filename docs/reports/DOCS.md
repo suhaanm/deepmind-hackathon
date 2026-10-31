@@ -9,6 +9,12 @@
 - New `docs/FILES.md` (search.ts already referenced it). `docs/AGENCY.md` (AGENCY's) read and consistent with `docs/reports/AGENCY.md`.
 - Bus lines sent: DEMO (SHOWTIME.md), QA (stale QA_STATUS), ORCH (flags missing from .env.example). Bus `@DOCS` line from AGENCY: done.
 
+## Final pass (15:25 GMT, ORCH-B request)
+- FILES.md: REDACT_VERSION 2 text, `fileFolders` only via `files:addFolder` (checked in ipc.ts and debug-server.ts), refused folders unlisted, dropped the unproven "flagged as instructions" claim, added MAC_B results.
+- SHOWTIME/README/DEMO_SCRIPT/ARCHITECTURE: scripted Showtime = practice desktop, not real macOS; real-macOS demo = voice/chat; practice-desktop numbers labelled as such; pointing not verified on a real desktop (MAC_A); agency "dry-run verified only" (MAC_B); Showtime real-Electron run reached 11/11 before fixes, fixes unverified.
+- Licence: README and SUBMISSION say no LICENSE file by the user's decision, all rights reserved, never claim a licence. Notices: 16 files, all listed; no Sentient reference in `src`.
+- Not done: QA_STATUS.md still showed the 14:48 gate (vitest 2 failed) at 15:25; README quotes no test counts from it. Re-read it before submit.
+
 ## Verified-vs-unverified I rely on
 Agency: 228 tests, 3 real computer_use calls; `act_for_me` off unless `ALONGSIDE_AGENCY_LOOP=1`; no real click/key. Actuator: 173 tests, never real. Files: 66 tests, no real-window or fresh real-key run. Onboarding: 30 tests + gallery, no real window. Shell/tray: 22/22 real run. Showtime: no report, not wired in `src/main/index.ts` at 14:48, no `docs/SHOWTIME.md`.
 

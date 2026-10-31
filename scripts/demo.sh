@@ -3,7 +3,7 @@
 #
 # Usage:  npm run demo [-- <flags>]
 #   --keep-profile   do not touch profile.md (keep the learner state as it is)
-#   --accurate       grounding preset "accurate" (flash only, slower); default is "fast" or $ALONGSIDE_GROUNDING_PRESET
+#   --accurate       grounding preset "accurate" (flash only, slower); default is "accurate" or $ALONGSIDE_GROUNDING_PRESET
 #   --force          launch even if preflight has red rows (you have been warned)
 #   --no-app         do everything except start the app (used to test this script)
 #
@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.." || exit 1
 USERDATA="${ALONGSIDE_USERDATA:-$HOME/.alongside-demo}"
 STAGE_PORT="${STAGE_PORT:-5180}"
 SEED="src/main/teaching/fixtures/demo-profile.md"
-PRESET="${ALONGSIDE_GROUNDING_PRESET:-fast}"
+PRESET="${ALONGSIDE_GROUNDING_PRESET:-accurate}"
 KEEP=0 FORCE=0 NOAPP=0
 for arg in "$@"; do
   case "$arg" in

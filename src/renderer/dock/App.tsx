@@ -3,7 +3,7 @@ import { DEFAULT_PERSONA, PERSONAS } from '../../shared/personas'
 import { ConfirmModal, applyDesignSettings } from '../design'
 import { chatBus } from './chat/bus'
 import { FilesSection } from './files'
-import { useCompanionState, useSettings } from './hooks'
+import { useCompanionState, useSettings, useShowtimeActive } from './hooks'
 import { OnboardingFlow, requestOnboarding } from './onboarding'
 import { Panel, type DockTab } from './Panel'
 import { Pill } from './Pill'
@@ -27,7 +27,9 @@ export function App(): ReactElement | null {
   const personaName = PERSONAS[personaId].displayName
   const confirmPending = state?.pendingConfirm !== undefined
   const onboarding = settings !== null && !settings.onboardingDone
-  const open = expanded || confirmPending || onboarding
+  // The walkthrough's controls need room, so the panel stays open while the demo runs (they never cover the header).
+  const demoRunning = useShowtimeActive()
+  const open = expanded || confirmPending || onboarding || demoRunning
 
   useEffect(() => {
     if (settings) applyDesignSettings(settings, personaId)
