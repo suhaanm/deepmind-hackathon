@@ -1,0 +1,16 @@
+node_modules/
+out/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+# per-run Electron profiles
+userData/
+.alongside-userdata/
+.userdata*/
+spikes/*/node_modules/
+# coordination markers are local only
+.contracts-ready
+.scaffold-ready

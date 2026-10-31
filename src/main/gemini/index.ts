@@ -1,0 +1,15 @@
+// Public surface of the Gemini-backed services. Each factory takes { ai, models, log } (+ optional capture so a
+// service can grab its own 'ground'/'verify' shot). Build deps once with createGeminiDeps({ log, capture }).
+export { createGeminiDeps, createAi, latencySummary, resetLatency, GeminiError } from './client'
+export type { GeminiDeps, AiLike, Models, Log } from './client'
+export { createGrounder, normaliseTarget } from './grounder'
+export type { GroundConfig, GroundPreset, GrounderWithPrefetch } from './grounder'
+export { createVerifier } from './verifier'
+export type { VerifierConfig } from './verifier'
+export { createLessonArchitect } from './lesson-architect'
+export type { ArchitectConfig } from './lesson-architect'
+export { createScamAnalyst } from './scam-analyst'
+export type { ScamConfig } from './scam-analyst'
+export { createRouter } from './router'
+export type { RouterConfig } from './router'
+export * as groundingUtils from './grounding-utils'

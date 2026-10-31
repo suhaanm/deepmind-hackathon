@@ -1,0 +1,99 @@
+import { ipcMain } from 'electron'
+import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
+import { z } from 'zod'
+import { IPC } from '../shared/ipc'
+import type { InvokeArgs, InvokeChannel, InvokeResult, SendArgs, SendChannel } from '../shared/ipc'
+import type { Services } from '../shared/contracts'
+import { HELP_LEVEL_LABELS, PersonaIdSchema } from '../shared/protocol'
+import type { LiveToolCall, RendererStatePatch } from '../shared/protocol'
+import type { ConfirmBroker } from './confirm'
+import type { ServiceContext } from './context'
+import { mintLiveToken, mintWakeToken } from './live-auth'
+import type { SessionController } from './session'
+import type { Dispatch } from './tools/dispatcher'
+import type { Windows } from './windows'
+
+export interface IpcDeps {
+  ctx: ServiceContext
+  services: Services
+  windows: Windows
+  dispatch: Dispatch
+  confirm: ConfirmBroker
+  session: SessionController
+}
+
+const RendererStatePatchSchema = z.object({
+  phase: z.enum(['asleep', 'listening_for_name', 'connecting', 'live', 'thinking', 'speaking', 'error']).optional(),
+  micMuted: z.boolean().optional(),
+  lastError: z.string().max(500).optional(),
+})
+
+const DockModeSchema = z.enum(['compact', 'expanded'])
+
+export function registerIpc(deps: IpcDeps): void {
+  const { ctx, services, windows, dispatch, confirm, session } = deps
+
+  const guard = (event: IpcMainEvent | IpcMainInvokeEvent) => {
+    if (!windows.owns(event.sender.id)) throw new Error('IPC from an unknown sender')
+  }
+  const handle = <C extends InvokeChannel>(channel: C, fn: (...args: InvokeArgs<C>) => Promise<InvokeResult<C>> | InvokeResult<C>) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      guard(event)
+      return fn(...(args as InvokeArgs<C>))
+    })
+  }
+  const listen = <C extends SendChannel>(channel: C, fn: (...args: SendArgs<C>) => void) => {
+    ipcMain.on(channel, (event, ...args) => {
+      try {
+        guard(event)
+        fn(...(args as SendArgs<C>))
+      } catch (err) {
+        ctx.log('ipc', `${channel} rejected:`, err instanceof Error ? err.message : err)
+      }
+    })
+  }
+
+  handle(IPC.stateGet, () => ctx.state.get())
+  handle(IPC.statePatch, (patch) => {
+    const parsed = RendererStatePatchSchema.parse(patch) as RendererStatePatch
+    ctx.state.patch(parsed)
+  })
+  handle(IPC.settingsGet, () => ctx.settings.get())
+  handle(IPC.settingsPatch, (patch) => ctx.settings.patch(patch))
+  handle(IPC.liveToken, async (personaId) => {
+    PersonaIdSchema.parse(personaId)
+    return mintLiveToken()
+  })
+  handle(IPC.wakeToken, () => mintWakeToken())
+  handle(IPC.liveToolCall, (call: LiveToolCall) => dispatch(call.name, call.args, 'live'))
+  handle(IPC.teachingSystemInstruction, (personaId) => services.teaching.systemInstruction(PersonaIdSchema.parse(personaId)))
+  handle(IPC.captureLiveFrame, () => services.capture.liveFrame())
+  handle(IPC.learnerSnapshot, () => services.learner.snapshot())
+  handle(IPC.learnerMarkdown, (req) => services.learner.editMarkdown(req))
+  // AGENTS hook: agent:cancel
+  handle(IPC.agentCancel, (id) => services.agents.cancel(String(id)))
+  handle(IPC.dockMode, (mode) => windows.setDockMode(DockModeSchema.parse(mode)))
+
+  listen(IPC.overlayReady, (size) => {
+    ctx.log('ipc', `overlay ready ${size.width}x${size.height}`)
+    ctx.sendOverlay({ type: 'chip', level: ctx.state.get().level, label: HELP_LEVEL_LABELS[ctx.state.get().level] })
+  })
+  listen(IPC.wakeDetected, ({ personaId, source }) => {
+    PersonaIdSchema.parse(personaId)
+    ctx.bus.emit('wake', { personaId, source })
+    ctx.bus.emit('session:request', { personaId, source })
+  })
+  listen(IPC.sessionEnded, (reason) => ctx.bus.emit('session:ended', { reason }))
+  listen(IPC.stopPressed, () => session.stop('stop'))
+  listen(IPC.liveTranscript, ({ role, text, final }) => {
+    ctx.state.addCaption(role, text, final)
+    if (ctx.settings.get().captions) services.overlay.caption(role, text, final)
+  })
+  listen(IPC.liveStatus, ({ connected, phase }) => {
+    if (!connected && phase !== 'error') return
+    ctx.state.patch({ phase, ...(phase === 'error' ? {} : { lastError: undefined }) })
+  })
+  listen(IPC.confirmAnswer, ({ id, choice }) => {
+    if (!confirm.answer(id, choice)) ctx.log('ipc', 'ignored confirm answer (stale or invalid)')
+  })
+}
