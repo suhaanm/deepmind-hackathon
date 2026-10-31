@@ -860,3 +860,16 @@
     setTimeout(function () { btn.textContent = 'You can close this tab now'; }, 600);
   });
 })();
+
+// Sticky notes (interactive demo only, ?notes=1): cue cards for the presenters (N hides them) and a staged bank scam message.
+(function () {
+  var box = document.getElementById('demo-notes'), cues = document.getElementById('cue-notes');
+  if (!box || new URLSearchParams(location.search).get('notes') !== '1') return;
+  box.hidden = false;
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.key.toLowerCase() !== 'n') return;
+    var t = e.target;
+    if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable || t.tagName === 'INPUT')) return;
+    cues.hidden = !cues.hidden;
+  });
+})();

@@ -116,7 +116,7 @@ export function registerShowtime(deps: RegisterShowtimeDeps): Showtime {
   // so the assistant can see it and the S / G / Shift+R / F keys reach it. The window closes with the app.
   if (process.env.ALONGSIDE_STAGE_ONLY === '1') {
     setTimeout(() => {
-      void openStageWindow({ log, exitButton: true })
+      void openStageWindow({ log, exitButton: true, notes: true })
         .then(() => {
           app.focus({ steal: true })
           const win = BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Practice desktop')

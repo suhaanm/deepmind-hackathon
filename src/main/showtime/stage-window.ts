@@ -35,7 +35,7 @@ const CURSOR_JS = `(function(){
 
 const clamp = (n: number): number => Math.min(1000, Math.max(0, n))
 
-export async function openStageWindow(opts: { log: (msg: string) => void; indexHtml?: string; exitButton?: boolean }): Promise<StageWindow> {
+export async function openStageWindow(opts: { log: (msg: string) => void; indexHtml?: string; exitButton?: boolean; notes?: boolean }): Promise<StageWindow> {
   const display = screen.getPrimaryDisplay()
   const win = new BrowserWindow({
     x: display.bounds.x,
@@ -61,7 +61,7 @@ export async function openStageWindow(opts: { log: (msg: string) => void; indexH
   // Below the dock ('floating') and the overlay ('screen-saver'), above ordinary windows.
   win.setAlwaysOnTop(true, 'floating', -1)
   const index = opts.indexHtml ?? path.join(app.getAppPath(), 'apps/demo-stage/index.html')
-  await win.loadFile(index, { query: opts.exitButton ? { still: '1', exit: '1' } : { still: '1' }, hash: 'desktop' })
+  await win.loadFile(index, { query: { still: '1', ...(opts.exitButton ? { exit: '1' } : {}), ...(opts.notes ? { notes: '1' } : {}) }, hash: 'desktop' })
   win.showInactive()
   if (process.platform === 'darwin') win.setSimpleFullScreen(true)
   else win.setBounds(display.bounds)

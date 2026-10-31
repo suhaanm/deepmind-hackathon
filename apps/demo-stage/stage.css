@@ -390,3 +390,16 @@ html.still *, html.still *::before, html.still *::after { animation: none !impor
 .exit-demo:hover{background:rgba(18,24,38,.9)}
 .exit-demo:focus-visible{outline:3px solid #7fd8ff;outline-offset:3px}
 .exit-demo.armed{background:#b3261e;border-color:#ffd9d6}
+
+/* Interactive-demo sticky notes (only with ?notes=1). Decorative: they never take clicks and are not ground-truth targets. */
+.demo-notes{position:fixed;inset:0;pointer-events:none;z-index:1}
+.demo-notes[hidden]{display:none}
+.cue-notes[hidden]{display:none}
+.cue-head{position:absolute;left:9%;top:4.5%;font:700 .8rem/1 system-ui,-apple-system,sans-serif;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.75)}
+.cue{position:absolute;left:var(--x);top:var(--y);width:17rem;min-height:7.4rem;padding:.8rem 1rem;border-radius:.35rem;transform:rotate(var(--r));background:#bfdbfe;color:#0f172a;box-shadow:0 .5rem 1rem rgba(0,0,0,.3);font:600 1.15rem/1.35 system-ui,-apple-system,"Segoe UI",sans-serif}
+.cue b{display:block;margin-bottom:.3rem;font-size:.78rem;letter-spacing:.09em;text-transform:uppercase;color:#1d4ed8}
+.cue small{display:block;margin-top:.45rem;font-size:.85rem;font-weight:500;color:#334155}
+.scam-note{position:absolute;left:var(--x);top:var(--y);width:24rem;padding:.9rem 1.1rem 1rem;border-radius:1rem;background:#fff;color:#111827;border-left:.5rem solid #b91c1c;box-shadow:0 .6rem 1.4rem rgba(0,0,0,.35);transform:rotate(.8deg);font:500 1.1rem/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+.scam-note .sn-head{display:flex;justify-content:space-between;gap:1rem;margin-bottom:.5rem;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#7f1d1d}
+.scam-note p{margin:0}
+@media (max-width:1100px){.demo-notes{display:none}}
