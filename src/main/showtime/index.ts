@@ -116,11 +116,16 @@ export function registerShowtime(deps: RegisterShowtimeDeps): Showtime {
   // so the assistant can see it and the S / G / Shift+R / F keys reach it. The window closes with the app.
   if (process.env.ALONGSIDE_STAGE_ONLY === '1') {
     setTimeout(() => {
-      void openStageWindow({ log })
+      void openStageWindow({ log, exitButton: true })
         .then(() => {
           app.focus({ steal: true })
           const win = BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Practice desktop')
           win?.focus()
+          // The Exit demo button closes this window: that ends the interactive demo the same way Stop does.
+          win?.once('closed', () => {
+            log('practice desktop closed from its Exit button: quitting')
+            app.quit()
+          })
           log('practice desktop open for the interactive demo')
         })
         .catch((err: unknown) => log(`practice desktop could not open: ${err instanceof Error ? err.message : String(err)}`))

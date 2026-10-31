@@ -839,3 +839,24 @@
   api.ready = true;
   try { window.dispatchEvent(new Event('stage:ready')); } catch (e) { /* ignore */ }
 })();
+
+// Exit button (interactive demo only): click once to arm, click again within 3 s to close the practice desktop.
+(function () {
+  var btn = document.getElementById('exit-demo');
+  if (!btn || new URLSearchParams(location.search).get('exit') !== '1') return;
+  btn.hidden = false;
+  var timer = null;
+  function disarm() { btn.classList.remove('armed'); btn.textContent = 'Exit demo'; timer = null; }
+  btn.addEventListener('click', function () {
+    if (!timer) {
+      btn.classList.add('armed');
+      btn.textContent = 'Click again to exit';
+      timer = setTimeout(disarm, 3000);
+      return;
+    }
+    clearTimeout(timer);
+    btn.textContent = 'Closing\u2026';
+    window.close();
+    setTimeout(function () { btn.textContent = 'You can close this tab now'; }, 600);
+  });
+})();

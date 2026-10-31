@@ -384,3 +384,9 @@ body::before { content: ""; position: fixed; inset: 0; background: rgba(255, 140
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 html.still *, html.still *::before, html.still *::after { animation: none !important; transition: none !important; caret-color: transparent !important; scroll-behavior: auto !important; }
+
+/* Exit button for the interactive demo (only shown with ?exit=1; the app opens the window that way). Not a ground-truth target. */
+.exit-demo{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:9999;min-height:44px;padding:0 22px;border:1px solid rgba(255,255,255,.35);border-radius:999px;background:rgba(18,24,38,.72);color:#fff;font:600 16px/1 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.2px;cursor:pointer;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.exit-demo:hover{background:rgba(18,24,38,.9)}
+.exit-demo:focus-visible{outline:3px solid #7fd8ff;outline-offset:3px}
+.exit-demo.armed{background:#b3261e;border-color:#ffd9d6}
