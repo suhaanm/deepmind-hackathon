@@ -35,7 +35,7 @@ describe('tiers', () => {
       const d = per(a)
       expect(d.allowed && d.ask).toBe(false)
     }
-    for (const a of [{ kind: 'keys', value: 'return' }, { kind: 'open_app', value: 'Safari' }, { kind: 'click', label: 'Reply' }, { kind: 'click', label: 'Start call', confidence: 0.4 }] as ProposedAction[]) {
+    for (const a of [{ kind: 'keys', value: 'tab' }, { kind: 'open_app', value: 'Safari' }, { kind: 'click', label: 'Reply' }, { kind: 'click', label: 'Start call', confidence: 0.4 }] as ProposedAction[]) {
       const d = per(a)
       expect(d.allowed && d.ask).toBe(true)
     }
@@ -174,11 +174,12 @@ describe('apps, files, settings panes, keys', () => {
     expect(resolvePane('wi-fi')).toBe('wifi')
     for (const p of ['privacy', 'microphone', 'accessibility-privacy', 'passwords', 'apple id', '']) expect(verdict({ kind: 'open_settings', value: p }).allowed).toBe(false)
   })
-  it('keys: allowlist only, return is flagged as submit-shaped', () => {
-    for (const k of ['return', 'Tab', 'escape', 'space', 'Up Arrow', 'Command+L', 'cmd+t', 'cmd+w', 'cmd+f']) expect(verdict({ kind: 'keys', value: k }).allowed).toBe(true)
+  it('keys: allowlist only; Return is blocked unless the narrow after-typing allowance holds (see return-after-type.test.ts)', () => {
+    for (const k of ['Tab', 'escape', 'space', 'Up Arrow', 'Command+L', 'cmd+t', 'cmd+w', 'cmd+f']) expect(verdict({ kind: 'keys', value: k }).allowed).toBe(true)
     for (const k of ['cmd+q', 'cmd+shift+4', 'ctrl+c', 'f5', 'cmd+space', 'delete', '']) expect(verdict({ kind: 'keys', value: k }).allowed).toBe(false)
     const d = verdict({ kind: 'keys', value: 'return' })
-    expect(d.allowed && d.flags).toContain('submit_shaped')
+    expect(d.allowed).toBe(false)
+    expect(!d.allowed && d.reason).toMatch(/straight after typing a plain search/)
   })
 })
 

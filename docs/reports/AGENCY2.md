@@ -20,6 +20,13 @@ New: tests/agency/scope-and-goal.test.ts (goal negation table, consent labels, s
 - Audit lines said `app: Electron`: the prompt window held the focus at check time (allowed as Alongside's own window).
 - NOT run: the Safari careers goal (not in the batch, one slot only), so recovery, typing in the search field and consent-banner handling are verified by unit tests only, not on the real page.
 
+## Added 16:15: Return after typing, banners, actionable blocks
+- Return allowed ONLY in the narrow `return-after-type` case (policy.ts `returnAfterTypeProblem`, full conditions in docs/AGENCY.md); every deny case is a table row in tests/agency/return-after-type.test.ts, including the exact user case (type 'Software Engineer', Return described as "submit the search"). Return is now blocked by default (it used to ask unless the label had a denylist word). The same action id may repeat for Return after new typing, so 2 presses per task are possible.
+- In the observed real run a click on a suggestion sat between typing and Return, so under the specified rule that Return is still blocked; the model has to press Return straight after typing.
+- Decline options on banners (No thanks, Reject all, Only necessary, Dismiss, Close, Not now, Decline) pass; Accept/Agree/Allow stay blocked unless the goal says to accept the cookies. Blocked results now read "Blocked: X. why. Next: ...".
+- Flow test: click, No thanks, click, type, Return, scroll, open a role under one plan confirmation.
+- Not verified: none of this on the real Safari page (the coordinator runs it). Focused-element subrole could not be read in the one app tried (Claude); the window title decides in practice. Window title/URL of a page whose title contains words like "account" or "card" will keep Return blocked.
+
 ## Not done / caveats
 - src/main/showtime/driver.ts still patches `ask_each` when agency is off (other lane).
 - `open_for_me` still cannot know which browser received a link; only the preflight warning covers the headless Chrome case.

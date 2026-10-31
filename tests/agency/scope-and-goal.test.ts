@@ -30,7 +30,9 @@ describe('goal scan is negation-aware', () => {
     ['open the page without signing in; then submit the form', false],
     ['never mind, buy it', false],
     ['click Agree on the cookie banner', false],
-    ['accept all cookies', false],
+    ['accept all cookies', true], // the person explicitly asked for it
+    ['accept all cookies and pay the bill', false],
+    ['click Accept on the terms and conditions', false],
     ['I agree to the terms, open the page', false],
   ])('%s -> allowed=%s', (goal, allowed) => {
     expect(evaluateGoal(goal, ctx()).allowed).toBe(allowed)
@@ -57,7 +59,7 @@ describe('consent and cookie choices stay with the person', () => {
   it.each(['Click Agree', 'Click the "I agree" button', 'Click Allow all', 'Click Accept all cookies', 'Manage cookies', 'Give consent', 'Click Cookie settings'])('blocks the label "%s" and says so', (label) => {
     const d = evaluateAction({ kind: 'click', label }, ctx())
     expect(d.allowed).toBe(false)
-    if (!d.allowed) expect(d.reason).toMatch(/consent choices to you|never do that/i)
+    if (!d.allowed) expect(d.reason).toMatch(/consent choice|leave it to you/i)
   })
   it('the explanation names consent choices for agree / consent / cookie words', () => {
     for (const label of ['Click Agree', 'Click the cookie banner OK', 'Give consent']) {
@@ -73,7 +75,7 @@ describe('consent and cookie choices stay with the person', () => {
   })
   it('a goal that is itself a consent choice is refused with the consent wording', () => {
     const d = evaluateGoal('click Agree on the banner', ctx())
-    expect(!d.allowed && d.reason).toMatch(/I leave consent choices to you/)
+    expect(!d.allowed && d.reason).toMatch(/consent choice/)
   })
 })
 

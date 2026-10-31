@@ -20,7 +20,11 @@ Enforced in code (`src/main/agency/policy.ts`), not by the prompt:
 - Never into a secure field, during a scam check (`spot_scam` lesson or running `scam_check` agent), or on a `safetyCritical` lesson step.
 - URLs: http/https only, no credentials, no `javascript:`/`file:`/`data:`, no bare or private IPs, no punycode. The one localhost exception is our practice stage origin.
 - Keys: an allowlist only (no screenshot shortcut). Typed text max 300 characters.
-- Rate: at least 1.5 s between actions, at most 8 per task, at most 12 per minute.
+- **Return is blocked, with one narrow exception (`return-after-type`, user decision 16:11).** It passes only when ALL hold: the immediately preceding executed action of the same task was a `type` whose text is a plain query (80 characters or fewer, no `@`, no 6+ digit run, no card-like or secret-like text, nothing on the denylist); the focused element is not an `AXSecureTextField` (if that cannot be read, the frontmost window title must not match login, sign in, password, checkout, payment, pay, billing, card, account, register, apply-now or submit; if neither can be read, it stays blocked); the frontmost app is the task's scoped target and is a browser or a named native app (never Claude or a terminal); the goal has no denylist word once negated clauses are removed; no safety-critical step and no scam check; at most 2 Return presses per task; under `ask_per_task` the plan is already confirmed (then no further prompt; `ask_each` still asks). Only the word "submit" in the model's own description of the Return is ignored; any other denylist word still blocks. The audit line says `keys: return-after-type`. Return after a click, on a login or payment page, or for a dialog stays blocked.
+- **Cookie banners.** Declining options (No thanks, Reject, Reject all, Only necessary, Dismiss, Close, Not now, Decline) may be clicked even though their label says cookie or consent; Accept, Agree, Allow all and anything else with those words stay blocked, unless the GOAL text itself says to accept the cookies (then only cookie-banner labels pass). Other denylist words in the same label still block.
+- **Hard floors, never relaxed:** paying, purchasing and transfers; passwords and card details; sending or posting messages and email; permanent deletion; system security, permissions and Settings; installing software.
+- Blocked results say what was blocked, why in one sentence and what the learner can do next.
+- Rate: at least 1.5 s between actions, at most 12 per task, at most 16 per minute.
 - Stop (`session:ended`) ends a task at the next check; nothing is left half-done and nothing queued runs.
 
 ## Loop discipline (`act-for-me.ts`)
@@ -54,7 +58,7 @@ Real Mac, dry-run actuator, debug-route driven (`docs/reports/MAC_B.md`, 14:50-1
 
 Dry-run verified only: no approved real action (a real website open, app launch, Finder reveal, click, keystroke or scroll) has been verified on the Mac, because the test shell had no Accessibility and could not press the approval button.
 
-Not verified: a real click or keystroke (Accessibility has never been granted to a test run); the loop end to end in Electron; the real Verifier on a post-action screen. `ask_per_task` relies on the model's `intent` text, Google's `safety_decision` and the denylist for low-risk clicks, so `ask_each` is the recommended mode.
+Not verified: the loop end to end in Electron on a real web page (the Calculator goal, a real run at 16:05, passed; the Return-after-typing allowance and the cookie-banner decline are covered by unit tests with fake front-app and focus providers, not yet on the real careers page; reading the focused element's subrole through System Events returned nothing in the one app tried, so the window-title check is what decides in practice); the real Verifier on a post-action screen. `ask_per_task` relies on the model's `intent` text, Google's `safety_decision` and the denylist for low-risk clicks, so `ask_each` is the recommended mode.
 
 ## Auto-assist on stall (off by default)
 

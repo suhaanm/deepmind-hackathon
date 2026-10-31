@@ -36,9 +36,9 @@ import {
 } from './common'
 import type { AxResolve } from './ax-resolver'
 import { proposeNext, type Proposal, type ProposeRequest, type ProposedStep } from './computer-use'
-import { ActionLimiter, evaluateAction, evaluateGoal, MAX_ACTIONS_PER_TASK, type ProposedAction } from './policy'
+import { ActionLimiter, evaluateAction, evaluateGoal, goalAcceptsCookies, MAX_ACTIONS_PER_TASK, normaliseKeys, riskWords, stripNegatedClauses, type ProposedAction, type ReturnFacts } from './policy'
 import type { DoneForMeSink } from './open-for-me'
-import { checkScope, isOwnApp, scopeFromGoal, type FrontApp, type ScopeState } from './scope'
+import { checkScope, isBrowser, isOwnApp, scopeFromGoal, type FrontApp, type ReadFocus, type ScopeState } from './scope'
 
 export const MAX_TASK_MS = 120_000
 // The model asking for an already-run step again: it is told, and may pick another step this many times per task.
@@ -67,6 +67,8 @@ export interface ActOptions {
   resolveAx?: AxResolve
   // Frontmost application name (scope enforcement); absent or null = unknown, never blocks.
   frontApp?: FrontApp
+  // Focused-element / window-title read for the narrow Return allowance; absent = it cannot tell, so Return stays blocked.
+  focusInfo?: ReadFocus
 }
 
 const hashOf = (shot: Shot): string => createHash('sha1').update(shot.jpegBase64).digest('hex')
@@ -202,6 +204,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
     const scopeState: ScopeState = { scope: scopeFromGoal(task) }
     frontNow = undefined
     const clicksOn = new Map<string, number>()
+    const acceptsCookies = goalAcceptsCookies(task)
     let repeatRecoveries = 0
     let feedback: string | undefined
     let lastNote = 'nothing has been done yet'
@@ -266,6 +269,9 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       planApproved = true
     }
 
+    // The narrow Return allowance: what the immediately preceding executed action was, and how many Returns were pressed.
+    let prevTyped: string | null = null
+    let returnsDone = 0
     let carry: Shot | null = null
     let done = 0
     let unchanged = 0
@@ -327,7 +333,31 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       seen.add(step.id)
 
       const action = toProposed(step)
-      const decision = evaluateAction(action, policyContext(deps, sit, planApproved))
+      // Return is judged on facts read now (front app, window title, focused field), once per step and reused after any prompt.
+      let returnFacts: ReturnFacts | undefined
+      if (step.tool === 'keys' && ['return', 'enter'].includes(normaliseKeys(step.keys ?? ''))) {
+        let front: string | null = null
+        let focus: { secure: boolean | null; title: string | null } = { secure: null, title: null }
+        try {
+          front = opts.frontApp ? await opts.frontApp() : null
+          if (opts.focusInfo) focus = await opts.focusInfo()
+        } catch {
+          // unreadable: Return stays blocked
+        }
+        const target = scopeState.target ?? null
+        returnFacts = {
+          prevTypedText: prevTyped,
+          returnsSoFar: returnsDone,
+          secureField: focus.secure,
+          windowTitle: focus.title,
+          frontApp: front,
+          targetApp: target,
+          targetKnown: target !== null && (isBrowser(target) || scopeState.scope.kind === 'app'),
+          goalClean: riskWords(stripNegatedClauses(task)) === null,
+        }
+      }
+      const policyNow = (): ReturnType<typeof policyContext> => ({ ...policyContext(deps, sit, planApproved), ...(acceptsCookies ? { goalAcceptsCookies: true } : {}), ...(returnFacts ? { returnFacts } : {}) })
+      const decision = evaluateAction(action, policyNow())
       const spot = step.point
       const what = say(step)
       const annotations: Annotation[] = []
@@ -339,7 +369,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
         annotations.push(banner('I will leave this one to you.', 12_000, 'warn'))
         safely(ctx, 'overlay', () => s.overlay.show(annotations))
         await audit({ decision: decision.code === 'agency_off' ? 'refused' : 'blocked', ok: false, code: decision.code, label: oneLine(action.kind, 20), step: done })
-        return result(decision.code, false, false, `${decision.reason} Steps done so far: ${done}. Show the learner the target and let them do it.`, { steps: done, label: oneLine(what, 60) })
+        return result(decision.code, false, false, `Blocked: "${oneLine(what, 60)}". ${decision.reason} Steps done so far: ${done}. Next: point at it so the learner can do that one step, and offer to carry on afterwards.`, { steps: done, label: oneLine(what, 60) })
       }
 
       annotations.push(banner(`I'm going to ${what}.`, GHOST_TTL_MS))
@@ -365,7 +395,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
       }
       // Settings can change and Stop can land while a modal waits: re-check both, then spend the approval on this one action.
       if (stopped()) return stopResult(done)
-      const recheck = evaluateAction(action, policyContext(deps, sit, planApproved))
+      const recheck = evaluateAction(action, policyNow())
       if (!recheck.allowed) {
         clearScreen()
         await audit({ decision: 'refused', ok: false, code: recheck.code, label: oneLine(action.kind, 20), step: done })
@@ -380,7 +410,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
         if (ax) {
           // The denylist and policy apply to the words of the element that will really be hit, too.
           const axAction: ProposedAction = { ...action, targetText: [action.targetText, ax.text].filter(Boolean).join(' ') }
-          const axDecision = evaluateAction(axAction, policyContext(deps, sit, planApproved))
+          const axDecision = evaluateAction(axAction, policyNow())
           if (!axDecision.allowed) {
             clearScreen()
             await audit({ decision: 'blocked', ok: false, code: axDecision.code, label: oneLine(action.kind, 20), step: done })
@@ -443,7 +473,12 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
         return result(noAx ? 'accessibility' : 'failed', true, false, noAx ? 'The Accessibility permission is missing, so nothing was done. Show the learner where to act.' : 'That action did not go through, so I stopped and did not retry. Show the learner how instead.', { steps: done })
       }
       done++
-      await audit({ decision: 'allowed', ok: true, code: 'step', label: oneLine(`${action.kind}: ${action.kind === 'type' ? 'text' : what}`, 60), step: done, dryRun: r.reason === 'dry-run' })
+      prevTyped = step.tool === 'type' ? (step.text ?? null) : null
+      // New text in the field changes what a key press does: Return may be asked for again (still capped by the policy).
+      if (step.tool === 'type') for (const id of [...seen]) if (id.startsWith('keys:')) seen.delete(id)
+      const returnAfterType = decision.flags.includes('return-after-type')
+      if (returnAfterType) returnsDone++
+      await audit({ decision: 'allowed', ok: true, code: 'step', label: returnAfterType ? 'keys: return-after-type' : oneLine(`${action.kind}: ${action.kind === 'type' ? 'text' : what}`, 60), step: done, dryRun: r.reason === 'dry-run' })
 
       if (r.reason === 'dry-run') {
         history.push(`${what} (dry run, nothing happened)`)

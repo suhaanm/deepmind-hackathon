@@ -14,6 +14,7 @@ import path from 'node:path'
 import type { AgencyCode } from '../../shared/protocol'
 import type { Settings } from '../../shared/settings'
 import { denylistMatch } from '../actuator/policy'
+import { isNeverActApp } from './scope'
 
 export type Agency = Settings['agency']
 export type Risk = 'low' | 'medium' | 'high'
@@ -43,6 +44,10 @@ export interface PolicyContext {
   scamContext: boolean
   // The learner confirmed the plan for this task (ask_per_task).
   planApproved: boolean
+  // The goal text itself explicitly asks to accept / agree to cookies or consent: consent words in a label then pass.
+  goalAcceptsCookies?: boolean
+  // Facts the loop gathered for the narrow Return allowance (see returnAfterTypeProblem); absent = Return stays blocked.
+  returnFacts?: ReturnFacts
   // Our own practice stage origin, the only localhost address open_url may reach.
   stageOrigin?: string
   // Folders the learner consented to for file reveal; empty means the home folder only.
@@ -53,6 +58,57 @@ export interface PolicyContext {
 export type PolicyDecision =
   | { allowed: false; code: Extract<AgencyCode, 'agency_off' | 'blocked' | 'safety_step' | 'scam_check' | 'invalid'>; reason: string; flags: string[] }
   | { allowed: true; ask: boolean; risk: Risk; reason: string; flags: string[] }
+
+// ---------- the narrow Return allowance ----------
+// Return is blocked, with ONE exception: it may submit a plain search query that was typed by the immediately preceding
+// action of the same task, on a normal page of the app the task is about. Everything below must hold.
+export interface ReturnFacts {
+  // Text of the immediately preceding EXECUTED action when it was a `type`, else null.
+  prevTypedText: string | null
+  // Return presses already made in this task.
+  returnsSoFar: number
+  // AX subrole of the focused element is AXSecureTextField: true / false, or null when it could not be read.
+  secureField: boolean | null
+  // Title of the frontmost window, or null when it could not be read.
+  windowTitle: string | null
+  frontApp: string | null
+  // The app the task is scoped to (scope.ts), and whether it is a browser or a named native app.
+  targetApp: string | null
+  targetKnown: boolean
+  // The goal text holds no denylist word once negated clauses are removed.
+  goalClean: boolean
+}
+
+export const MAX_RETURNS_PER_TASK = 2
+export const MAX_QUERY_CHARS = 80
+const RETURN_BAD_TITLE = /login|sign.?in|log.?in|password|checkout|payment|pay|billing|card|account|register|apply-now|submit/i
+
+// Does the typed text look like an ordinary search? (It has already passed the typed-text scan to get this far.)
+export function plainQuery(text: string | null | undefined): boolean {
+  if (!text) return false
+  const t = text.trim()
+  if (!t || t.length > MAX_QUERY_CHARS || t.includes('@') || /\d{6,}/.test(t) || /(?:\d[ -]?){9,}/.test(t)) return false
+  return !typedTextProblem(t)
+}
+
+// null = this Return may be pressed; otherwise the plain reason it is left to the person.
+export function returnAfterTypeProblem(ctx: PolicyContext): string | null {
+  const f = ctx.returnFacts
+  const left = 'I only press Return straight after typing a plain search on the page you asked about. This is not that, so I leave it to you.'
+  if (!f) return left
+  if (f.prevTypedText === null) return left
+  if (!plainQuery(f.prevTypedText)) return 'The text I typed is not a plain search, so I leave pressing Return to you.'
+  if (f.returnsSoFar >= MAX_RETURNS_PER_TASK) return `I already pressed Return ${MAX_RETURNS_PER_TASK} times in this task, so I leave the rest to you.`
+  if (ctx.agency === 'ask_per_task' && !ctx.planApproved) return left
+  if (f.secureField === true) return 'The box in focus is a password or secure box, so I never press Return there.'
+  if (f.windowTitle !== null && RETURN_BAD_TITLE.test(f.windowTitle)) return 'This page looks like a sign-in, payment or form page, so I leave pressing Return to you.'
+  if (f.secureField === null && f.windowTitle === null) return 'I cannot tell what page this is, so I leave pressing Return to you.'
+  if (f.frontApp !== null && isNeverActApp(f.frontApp)) return 'That app is one I never act in, so I leave pressing Return to you.'
+  const sameApp = f.frontApp !== null && f.targetApp !== null && f.frontApp.trim().toLowerCase() === f.targetApp.trim().toLowerCase()
+  if (!sameApp || !f.targetKnown) return 'The app in front is not the one this task is about, so I leave pressing Return to you.'
+  if (!f.goalClean) return left
+  return null
+}
 
 export const LOW_CONFIDENCE = 0.7
 export const MAX_ACTIONS_PER_TASK = 12
@@ -315,6 +371,21 @@ export function stripNegatedClauses(goal: string): string {
   return goal.replace(NEGATED_CLAUSE, ' ').replace(/\s+/g, ' ').trim()
 }
 
+// Privacy-preserving banner options: clicking these only DECLINES or hides the banner, so the consent words in their label
+// (cookies, consent) do not block them. A label that also says accept / agree / allow is never one of them.
+const PRIVACY_OPTION = /\b(?:decline|reject|reject\s+all|no\s+thanks|no,?\s+thank\s+you|only\s+(?:necessary|essential)|(?:necessary|essential)\s+only|dismiss|close|not\s+now|deny|refuse|continue\s+without\s+accepting)\b/i
+const POSITIVE_CONSENT = /\b(?:accept|agree|allow|permit|enable|grant|yes|ok|okay|got\s+it)\b/i
+export const isPrivacyOption = (label: string | undefined): boolean => !!label && PRIVACY_OPTION.test(label) && !POSITIVE_CONSENT.test(label)
+// Wording that is only about consent (cookie banners).
+const CONSENT_WORDS_RE = /\b(?:accept(?:ing)?(?:\s+all)?|allow(?:\s+all)?|i\s+agree|agree|consent|cookies?)\b/gi
+const CONSENT_CONTEXT = /cookie|consent|banner|privacy/i
+// "accept the cookies", "agree to cookies", "allow all cookies" in the GOAL: the person asked for it.
+const GOAL_ACCEPTS_COOKIES = /\b(?:accept|agree\s+to|allow)(?:\s+(?:all|the|any|these|those|our|their))*\s+(?:cookies?|cookie\s+banner|consent)\b/gi
+export const goalAcceptsCookies = (goal: string): boolean => {
+  GOAL_ACCEPTS_COOKIES.lastIndex = 0
+  return GOAL_ACCEPTS_COOKIES.test(stripNegatedClauses(goal))
+}
+
 // Consent / cookie words: the person's own choice, never made for them.
 const CONSENT_WORD = /^(?:agree|i\s+agree|consent|cookie|allow\s+all|accept\s+all)/i
 export const isConsentWord = (word: string): boolean => CONSENT_WORD.test(word.trim())
@@ -341,7 +412,8 @@ export function appProblem(name: string): string | null {
   return null
 }
 
-function baseRisk(action: ProposedAction, ctx: PolicyContext): Risk {
+function baseRisk(action: ProposedAction, ctx: PolicyContext, returnOk = false): Risk {
+  if (returnOk && ctx.agency === 'ask_per_task' && ctx.planApproved) return 'low'
   // Plain typed text that already passed every text scan is part of the plan the learner approved (ask_per_task).
   if (action.kind === 'type' && ctx.agency === 'ask_per_task' && ctx.planApproved) return 'low'
   switch (action.kind) {
@@ -359,9 +431,12 @@ function baseRisk(action: ProposedAction, ctx: PolicyContext): Risk {
 export function evaluateGoal(goal: string, ctx: PolicyContext): PolicyDecision {
   const gate = baseGate(ctx)
   if (gate) return gate
-  const word = riskWords(stripNegatedClauses(goal))
-  if (word && isConsentWord(word)) return blocked(`"${word}" is a consent choice, and I leave consent choices to you. I will show you instead.`, [`goal:${word}`])
-  if (word) return blocked(`"${word}" could involve money, passwords, messages, deleting things or permissions, so I never do that for you. I will show you instead.`, [`goal:${word}`])
+  let text = stripNegatedClauses(goal)
+  // An explicit request to accept cookies is the person's own choice; the rest of the goal is still scanned.
+  if (goalAcceptsCookies(goal)) text = text.replace(GOAL_ACCEPTS_COOKIES, ' ')
+  const word = riskWords(text)
+  if (word && isConsentWord(word)) return blocked(`"${word}" is a consent choice, so I leave it to you. Say "accept the cookies" if you want me to click it, or do it yourself and tell me to carry on.`, [`goal:${word}`])
+  if (word) return blocked(`"${word}" could involve money, passwords, messages, deleting things or permissions, so I leave it to you. Do that part yourself; I can help with the steps around it.`, [`goal:${word}`])
   return { allowed: true, ask: true, risk: 'low', reason: 'goal accepted', flags: [] }
 }
 
@@ -379,10 +454,30 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
 
   if (action.secureField) return blocked('That is a password or secure box, so I never type into it. I will leave it to you.', ['secure_field'])
 
+  // Return is blocked unless the narrow allowance holds. When it does, the model's own words may say "submit the search":
+  // that one word is ignored for the label scan only; every other denylist word still blocks.
+  const isReturn = action.kind === 'keys' && ['return', 'enter'].includes(normaliseKeys(action.value ?? ''))
+  let returnOk = false
+  if (isReturn) {
+    const why = returnAfterTypeProblem(ctx)
+    if (why) return blocked(why, ['keys', 'return'])
+    returnOk = true
+    flags.push('return-after-type')
+  }
+  const unSubmit = (t?: string): string | undefined => (returnOk && t ? t.replace(/\bsubmit\w*/gi, ' ') : t)
+  // A banner option that only declines or hides (No thanks, Reject all, Only necessary, Dismiss, Close, Not now): the consent words
+  // in its label are fine. With an explicit "accept cookies" goal, consent wording passes too. Every other word still blocks.
+  const declineBanner = (action.kind === 'click' || action.kind === 'double_click') && isPrivacyOption(action.label)
+  const consentOk = declineBanner || (ctx.goalAcceptsCookies === true && (action.kind === 'click' || action.kind === 'double_click') && CONSENT_CONTEXT.test(`${action.label ?? ''} ${action.targetText ?? ''}`))
+  const forScan = (t?: string): string | undefined => {
+    const u = unSubmit(t)
+    return consentOk && u ? u.replace(CONSENT_WORDS_RE, ' ') : u
+  }
+
   // The hard denylist applies to the grounded label, the target text and any typed text.
-  const word = riskWords(action.label, action.targetText, action.kind === 'type' ? action.text : undefined)
-  if (word && isConsentWord(word)) return blocked(`"${word}" is a consent choice (cookies, agreeing to terms). I leave consent choices to you: I will show where it is and leave it to you.`, [`word:${word}`, 'consent'])
-  if (word) return blocked(`"${word}" could involve money, passwords, messages, deleting things or permissions, so I never do that. I will show it and leave it to you.`, [`word:${word}`])
+  const word = riskWords(forScan(action.label), forScan(action.targetText), action.kind === 'type' ? action.text : undefined)
+  if (word && isConsentWord(word)) return blocked(`"${word}" is a consent choice, so I leave consent choices to you. I did not click it: choose it yourself, or tell me to pick "No thanks" or "Reject all" instead.`, [`word:${word}`, 'consent'])
+  if (word) return blocked(`"${word}" could involve money, passwords, messages, deleting things or permissions, so I leave it to you. I did not do it: please do that step yourself, then tell me to carry on.`, [`word:${word}`])
 
   switch (action.kind) {
     case 'open_url': {
@@ -415,7 +510,6 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
     case 'keys': {
       const combo = normaliseKeys(action.value ?? '')
       if (!KEY_ALLOWLIST.has(combo)) return blocked('That key combination is not one I use.', ['keys'])
-      if (combo === 'return' || combo === 'enter') flags.push('submit_shaped')
       break
     }
     case 'click':
@@ -425,7 +519,7 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
       break
   }
 
-  let risk = baseRisk(action, ctx)
+  let risk = baseRisk(action, ctx, returnOk)
   if (CONFIRM_WORDS.test(`${action.label ?? ''} ${action.targetText ?? ''}`)) {
     flags.push('send_shaped')
     risk = 'medium'
@@ -434,7 +528,7 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
     flags.push('low_confidence')
     risk = 'medium'
   }
-  if (flags.includes('http_not_https') || flags.includes('submit_shaped')) risk = 'medium'
+  if (flags.includes('http_not_https')) risk = 'medium'
 
   // Tier decision. ask_each confirms everything; ask_per_task lets low-risk, plan-covered actions through.
   const ask = ctx.agency === 'ask_each' || ctx.agency === 'autonomous' || risk !== 'low' || !ctx.planApproved

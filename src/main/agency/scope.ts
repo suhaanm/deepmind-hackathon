@@ -78,6 +78,43 @@ const run = (args: string[], timeoutMs: number): Promise<string> =>
 
 export type FrontApp = () => Promise<string | null>
 
+// What the narrow Return allowance needs to know about the frontmost window: whether the focused element is a secure
+// text field (AX subrole only, never its value) and the window title. null = could not be read.
+export interface FocusInfo {
+  secure: boolean | null
+  title: string | null
+}
+export type ReadFocus = () => Promise<FocusInfo>
+
+export const FOCUS_JXA = `function run() {
+  var se = Application('System Events');
+  var procs = se.processes.whose({frontmost: true})();
+  if (!procs.length) return '{}';
+  var p = procs[0];
+  var out = {secure: null, title: null};
+  try { out.title = String(p.windows[0].name()); } catch (e) {}
+  try {
+    var f = p.attributes.byName('AXFocusedUIElement').value();
+    out.secure = (String(f.attributes.byName('AXSubrole').value()) === 'AXSecureTextField');
+  } catch (e) {}
+  return JSON.stringify(out);
+}`
+
+export function parseFocusOutput(raw: string): FocusInfo {
+  try {
+    const j = JSON.parse(raw) as { secure?: unknown; title?: unknown }
+    return { secure: typeof j.secure === 'boolean' ? j.secure : null, title: typeof j.title === 'string' && j.title.trim() ? j.title.slice(0, 200) : null }
+  } catch {
+    return { secure: null, title: null }
+  }
+}
+
+export const readFocusInfo: ReadFocus = () =>
+  new Promise((resolve) => {
+    if (process.platform !== 'darwin') return resolve({ secure: null, title: null })
+    execFile('/usr/bin/osascript', ['-l', 'JavaScript', '-e', FOCUS_JXA], { timeout: 1500, killSignal: 'SIGKILL' }, (err, stdout) => resolve(err ? { secure: null, title: null } : parseFocusOutput(String(stdout).trim())))
+  })
+
 export const readFrontApp: FrontApp = async () => {
   if (process.platform !== 'darwin') return null
   const asn = (await run(['front'], 1500)).trim()
