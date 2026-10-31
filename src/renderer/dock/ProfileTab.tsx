@@ -29,6 +29,8 @@ export function ProfileTab({ carerSharing, onCarerSharing }: ProfileTabProps): R
   const [draft, setDraft] = useState('')
   const [latestOnConflict, setLatestOnConflict] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [adding, setAdding] = useState<ListKey | null>(null)
+  const [showMore, setShowMore] = useState(false)
 
   const docRef = useRef<Doc | null>(null)
   const quiet = useRef(true)
@@ -48,7 +50,12 @@ export function ProfileTab({ carerSharing, onCarerSharing }: ProfileTabProps): R
   useEffect(() => {
     void read()
     const timer = setInterval(() => quiet.current && void read(), 5000)
-    return () => clearInterval(timer)
+    const reread = (): void => void read()
+    window.addEventListener('alongside:showtime-profile', reread)
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('alongside:showtime-profile', reread)
+    }
   }, [read])
 
   // Every change is one write with the revision we last read; a stale revision never overwrites anything.
@@ -83,6 +90,7 @@ export function ProfileTab({ carerSharing, onCarerSharing }: ProfileTabProps): R
     const r = await write(addLine(doc.content, key, text))
     if (r === 'ok') {
       setAdds((a) => ({ ...a, [key]: '' }))
+      setAdding(null)
       setNotice('Written down.')
     } else if (r === 'conflict') {
       setNotice(`${STALE}Your words are still in the box. Press Add again.`)
@@ -156,7 +164,6 @@ export function ProfileTab({ carerSharing, onCarerSharing }: ProfileTabProps): R
 
   return (
     <div className="al-profile">
-      <p className="al-muted">This is the file I keep about you. You can read it, change it, or delete any line. I follow what it says.</p>
       {problem ? (
         <div className="al-banner" role="alert">
           <span className="al-banner__icon">
@@ -178,15 +185,20 @@ export function ProfileTab({ carerSharing, onCarerSharing }: ProfileTabProps): R
         return (
           <section key={key} className="al-group" aria-label={copy.title}>
             <h3 className="al-eyebrow">{copy.title}</h3>
-            <p className="al-small">{copy.hint}</p>
-            {section ? <Lines section={section} /> : <p className="al-small">Nothing written down yet.</p>}
-            <form className="al-addrow" onSubmit={(e) => void submitAdd(key, e)}>
-              <label className="al-sr" htmlFor={inputId}>{`Add to ${copy.title}`}</label>
-              <input id={inputId} className="al-input" type="text" maxLength={160} placeholder="Add a line" value={adds[key] ?? ''} onChange={(e) => setAdds((a) => ({ ...a, [key]: e.target.value }))} />
-              <button type="submit" className="al-btn" disabled={busy || !cleanNote(adds[key] ?? '')}>
-                Add
+            {section ? <Lines section={section} /> : <p className="al-small">Nothing yet.</p>}
+            {adding === key ? (
+              <form className="al-addrow" onSubmit={(e) => void submitAdd(key, e)}>
+                <label className="al-sr" htmlFor={inputId}>{`Add to ${copy.title}`}</label>
+                <input id={inputId} className="al-input" type="text" maxLength={160} autoFocus value={adds[key] ?? ''} onChange={(e) => setAdds((a) => ({ ...a, [key]: e.target.value }))} />
+                <button type="submit" className="al-btn al-btn--primary" disabled={busy || !cleanNote(adds[key] ?? '')}>
+                  Add
+                </button>
+              </form>
+            ) : (
+              <button type="button" className="al-btn al-btn--quiet al-forgetall al-addbtn" onClick={() => setAdding(key)}>
+                Add a line
               </button>
-            </form>
+            )}
           </section>
         )
       })}
@@ -194,91 +206,85 @@ export function ProfileTab({ carerSharing, onCarerSharing }: ProfileTabProps): R
       {others.map((s) => (
         <section key={s.headingIndex} className="al-group" aria-label={s.heading}>
           <h3 className="al-eyebrow">{s.heading}</h3>
-          <p className="al-small">{SECTION_COPY.other!.hint}</p>
           <Lines section={s} />
         </section>
       ))}
 
       <section className="al-group" aria-label="Who can see what">
         <h3 className="al-eyebrow">Who can see what</h3>
-        <p className="al-field__label" role="status">
-          {carerSharing ? 'Someone you trust can see a short summary of your progress. Never your screen or messages.' : 'Nobody else can see anything. Sharing is off.'}
-        </p>
-        <Switch label="Share progress with someone you trust" hint="Off unless you turn it on. Summaries only, never your screen." checked={carerSharing} onChange={onCarerSharing} />
-        {sharingLines.length > 0 ? (
-          <ul className="al-lines">
-            {sharingLines.map((l) => (
-              <li key={l.index} className="al-line">
-                <span className="al-line__text">{l.text}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <p role="status">{carerSharing ? 'Someone you trust sees a short summary. Never your screen.' : 'Nobody else. Sharing is off.'}</p>
+        <Switch label="Share my progress" checked={carerSharing} onChange={onCarerSharing} />
       </section>
 
       {last ? (
         <section className="al-group" aria-label="Last session">
           <h3 className="al-eyebrow">Last time</h3>
           <p>{last.text}</p>
-          <p className="al-small">Your skills, ratings and practice history are in the file too. See them on the Progress tab.</p>
         </section>
       ) : null}
 
-      <section className="al-group" aria-label="Edit the whole file">
-        <h3 className="al-eyebrow">The whole file</h3>
-        {editing ? (
-          <>
-            <label className="al-sr" htmlFor="al-profile-draft">
-              Your profile, as text
-            </label>
-            <textarea id="al-profile-draft" className="al-textarea" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck />
-            {latestOnConflict !== null ? (
-              <div className="al-conflict" role="alert">
-                <strong>It changed while you were editing.</strong>
-                <span>Your text is kept above. Here is the latest version.</span>
-                <pre className="al-latest">{latestOnConflict}</pre>
-                <div className="al-actions">
-                  <button type="button" className="al-btn" onClick={() => { setDraft(latestOnConflict); setLatestOnConflict(null) }}>
-                    Use the latest instead
-                  </button>
-                  <button type="button" className="al-btn al-btn--primary" disabled={busy} onClick={() => void saveDraft()}>
-                    Save mine over it
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="al-actions">
-                <button type="button" className="al-btn al-btn--primary" disabled={busy} onClick={() => void saveDraft()}>
-                  Save
-                </button>
-                <button type="button" className="al-btn" onClick={() => { setEditing(false); setLatestOnConflict(null) }}>
-                  Discard my changes
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            <p className="al-small">For people who like to see everything. Changes are only saved when you press Save.</p>
-            <button type="button" className="al-btn" onClick={() => { setDraft(doc.content); setLatestOnConflict(null); setEditing(true) }}>
-              Edit the whole file
-            </button>
-          </>
-        )}
-      </section>
+      <button type="button" className="al-btn al-more" aria-expanded={showMore} aria-controls="al-profile-more" onClick={() => setShowMore((v) => !v)}>
+        {showMore ? 'Less' : 'More'}
+        <Icon name="down" />
+      </button>
 
-      <section className="al-group al-danger" aria-label="Delete everything">
-        <h3 className="al-eyebrow">Start again</h3>
-        <p className="al-small">Erases your notes, goals, ratings and progress. It cannot be undone.</p>
-        <button type="button" className="al-btn al-btn--danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
-          Delete everything I know about you
-        </button>
-      </section>
+      {showMore ? (
+        <div id="al-profile-more" className="al-profile">
+          <section className="al-group" aria-label="Edit the whole file">
+            <h3 className="al-eyebrow">The whole file</h3>
+            {editing ? (
+              <>
+                <label className="al-sr" htmlFor="al-profile-draft">
+                  Your profile, as text
+                </label>
+                <textarea id="al-profile-draft" className="al-textarea" value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck />
+                {latestOnConflict !== null ? (
+                  <div className="al-conflict" role="alert">
+                    <strong>It changed while you were editing.</strong>
+                    <span>Your text is kept above. Here is the latest.</span>
+                    <pre className="al-latest">{latestOnConflict}</pre>
+                    <div className="al-actions">
+                      <button type="button" className="al-btn" onClick={() => { setDraft(latestOnConflict); setLatestOnConflict(null) }}>
+                        Use the latest
+                      </button>
+                      <button type="button" className="al-btn al-btn--primary" disabled={busy} onClick={() => void saveDraft()}>
+                        Save mine over it
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="al-actions">
+                    <button type="button" className="al-btn al-btn--primary" disabled={busy} onClick={() => void saveDraft()}>
+                      Save
+                    </button>
+                    <button type="button" className="al-btn" onClick={() => { setEditing(false); setLatestOnConflict(null) }}>
+                      Discard changes
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <button type="button" className="al-btn" onClick={() => { setDraft(doc.content); setLatestOnConflict(null); setEditing(true) }}>
+                Edit the whole file
+              </button>
+            )}
+          </section>
+
+          <section className="al-group al-danger" aria-label="Delete everything">
+            <h3 className="al-eyebrow">Start again</h3>
+            <button type="button" className="al-btn al-btn--danger" disabled={busy} onClick={() => setConfirmDelete(true)}>
+              Delete everything I know about you
+            </button>
+          </section>
+        </div>
+      ) : null}
 
       {confirmDelete ? (
         <ConfirmModal
-          personaName="Please check"
-          request={{ id: 'delete-profile', question: 'Delete everything I know about you? Your notes, goals and progress will be erased and cannot be brought back.', options: [DELETE_YES, DELETE_NO] }}
+          personaName=""
+          eyebrow="Please check"
+          destructive
+          request={{ id: 'delete-profile', question: 'Delete everything I know about you? This cannot be undone.', options: [DELETE_YES, DELETE_NO] }}
           onAnswer={(c) => void deleteAll(c)}
         />
       ) : null}

@@ -15,6 +15,8 @@ import type {
 } from './types'
 
 const MAX_FAILURES = 6
+// While unavailable the spotter keeps trying quietly, so a returning network or a granted permission recovers it.
+const RECOVERY_MS = 20_000
 const HANDOFF_LEAD_MS = 1500
 // If a wake fires but nobody pauses us for a Live session within this long, listen again.
 const WAKE_ORPHAN_MS = 15000
@@ -166,32 +168,63 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
     return started && !disposed && pausedFor().length === 0
   }
 
-  function fail(error: Error, fatal: boolean): void {
+  type FailureKind = 'net' | 'mic' | 'config'
+
+  // `detail` is shown to the user verbatim, so it is always plain English; the raw error only goes to the console.
+  function fail(error: Error, fatal: boolean, kind: FailureKind = 'net'): void {
+    console.warn('[wake]', kind, error)
     dropEngine()
     failures++
     if (!shouldListen()) return
     if (fatal || failures > MAX_FAILURES) {
-      emit('unavailable', `Voice activation is unavailable (${error.message}). Use the button or the keyboard shortcut.`)
       releaseAudio()
+      emit(
+        'unavailable',
+        kind === 'mic'
+          ? 'Voice activation needs microphone permission, or no microphone was found. Use the button or the keyboard shortcut.'
+          : 'Voice activation is unavailable right now. Use the button or the keyboard shortcut.',
+      )
+      if (kind !== 'config') scheduleRecovery(kind)
       return
     }
-    emit('reconnecting', error.message)
+    emit('reconnecting', 'Reconnecting to the voice service.')
     retryTimer = setTimeout(() => {
       retryTimer = null
       if (shouldListen() && !engine) void connect()
     }, Math.min(500 * 2 ** (failures - 1), 8000))
   }
 
+  // Network trouble is probed with a token request only, so the microphone is not opened while the cloud is unreachable.
+  function scheduleRecovery(kind: Exclude<FailureKind, 'config'>): void {
+    retryTimer = clear(retryTimer)
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (!shouldListen() || engine || connecting) return
+      if (kind === 'net' && options.getToken) {
+        options.getToken().then(
+          () => {
+            if (shouldListen() && !engine && !connecting) void connect()
+          },
+          () => {
+            if (shouldListen() && !engine && !connecting) scheduleRecovery('net')
+          },
+        )
+        return
+      }
+      void connect()
+    }, RECOVERY_MS)
+  }
+
   async function connect(): Promise<void> {
     if (connecting) return
     connecting = true
-    emit(failures ? 'reconnecting' : 'starting')
+    if (status.state !== 'unavailable') emit(failures ? 'reconnecting' : 'starting')
     try {
       try {
         await ensureAudio()
       } catch (e) {
         const denied = e instanceof Error && (e.name === 'NotAllowedError' || e.name === 'SecurityError')
-        fail(new Error(denied ? 'microphone permission needed' : `microphone error: ${e instanceof Error ? e.message : String(e)}`), denied)
+        fail(e instanceof Error ? e : new Error(String(e)), denied, 'mic')
         return
       }
       if (!shouldListen()) return
@@ -199,7 +232,7 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
       try {
         eng = makeEngine()
       } catch (e) {
-        fail(e instanceof Error ? e : new Error(String(e)), true)
+        fail(e instanceof Error ? e : new Error(String(e)), true, 'config')
         return
       }
       engine = eng
@@ -234,13 +267,14 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
   // Open the next stream before closing the old one so there is no deaf gap at the 10-minute connection cap.
   async function rotate(): Promise<void> {
     const old = engine
-    if (!old || rotating) return
-    rotating = true
     const f = ensureFactory()
-    if (!f) return
+    if (!old || !f || rotating) return
+    rotating = true
     let next = null as WakeEngine | null
+    let giveUp: ReturnType<typeof setTimeout> | null = null
     try {
       const swapped = new Promise<void>((resolve, reject) => {
+        giveUp = setTimeout(() => reject(new Error('rotation timed out')), 8000)
         const handlers: WakeEngineHandlers = {
           onReady: () => resolve(),
           onTranscript: (text, final) => {
@@ -258,6 +292,7 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
         next.start().catch(reject)
       })
       await swapped
+      giveUp = clear(giveUp)
       if (engine !== old || !next) {
         next?.stop()
         return
@@ -271,6 +306,7 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
       // Keep the old stream; it either survives or errors into the normal reconnect path.
       rotateTimer = setTimeout(() => void rotate(), 10_000)
     } finally {
+      giveUp = clear(giveUp)
       rotating = false
     }
   }
@@ -392,8 +428,10 @@ export function createWakeSpotter<Id extends string>(options: WakeSpotterOptions
       return snap.length ? snap : null
     },
     setSettings(patch) {
+      // The dock calls this on every state update; only a real change may touch the connection.
+      const changed = (Object.keys(patch) as (keyof WakeSettings)[]).some((k) => patch[k] !== undefined && settings[k] !== patch[k])
       Object.assign(settings, patch)
-      if (started) {
+      if (started && changed) {
         if (shouldListen() && status.state === 'unavailable') failures = 0
         reconcile()
       }

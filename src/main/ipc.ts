@@ -9,6 +9,8 @@ import type { LiveToolCall, RendererStatePatch } from '../shared/protocol'
 import type { ConfirmBroker } from './confirm'
 import type { ServiceContext } from './context'
 import { mintLiveToken, mintWakeToken } from './live-auth'
+import { registerFilesIpc } from './files'
+import type { Permissions } from './permissions'
 import type { SessionController } from './session'
 import type { Dispatch } from './tools/dispatcher'
 import type { Windows } from './windows'
@@ -20,7 +22,10 @@ export interface IpcDeps {
   dispatch: Dispatch
   confirm: ConfirmBroker
   session: SessionController
+  permissions?: Permissions
 }
+
+const PermissionPaneSchema = z.enum(['screen', 'microphone', 'accessibility'])
 
 const RendererStatePatchSchema = z.object({
   phase: z.enum(['asleep', 'listening_for_name', 'connecting', 'live', 'thinking', 'speaking', 'error']).optional(),
@@ -59,7 +64,14 @@ export function registerIpc(deps: IpcDeps): void {
     ctx.state.patch(parsed)
   })
   handle(IPC.settingsGet, () => ctx.settings.get())
-  handle(IPC.settingsPatch, (patch) => ctx.settings.patch(patch))
+  // FILES: the folder list changes only through the native dialog in main (files:addFolder), never through a renderer patch.
+  handle(IPC.settingsPatch, (patch) => {
+    if (typeof patch === 'object' && patch !== null && 'fileFolders' in patch) {
+      const { fileFolders: _ignored, ...rest } = patch as Record<string, unknown>
+      return ctx.settings.patch(rest)
+    }
+    return ctx.settings.patch(patch)
+  })
   handle(IPC.liveToken, async (personaId) => {
     PersonaIdSchema.parse(personaId)
     return mintLiveToken()
@@ -98,4 +110,34 @@ export function registerIpc(deps: IpcDeps): void {
   listen(IPC.confirmAnswer, ({ id, choice }) => {
     if (!confirm.answer(id, choice)) ctx.log('ipc', 'ignored confirm answer (stale or invalid)')
   })
+
+  // SHELL: macOS permissions. Subscribers get changes pushed while they are subscribed (main polls only then).
+  const { permissions } = deps
+  if (permissions) {
+    handle(IPC.permissionsStatus, () => permissions.status())
+    handle(IPC.permissionsRequestMicrophone, () => permissions.requestMicrophone())
+    handle(IPC.permissionsRequestScreen, () => permissions.requestScreen())
+    ipcMain.on(IPC.permissionsRequestAccessibility, (event) => {
+      try {
+        guard(event)
+        event.returnValue = permissions.requestAccessibility()
+      } catch {
+        event.returnValue = false
+      }
+    })
+    listen(IPC.permissionsOpenSettings, (pane) => permissions.openSettings(PermissionPaneSchema.parse(pane)))
+    listen(IPC.permissionsRelaunch, () => permissions.relaunch())
+    ipcMain.on(IPC.permissionsSubscribe, (event) => {
+      try {
+        guard(event)
+        permissions.subscribe(event.sender)
+      } catch (err) {
+        ctx.log('ipc', 'permissions subscribe rejected:', err instanceof Error ? err.message : err)
+      }
+    })
+    ipcMain.on(IPC.permissionsUnsubscribe, (event) => permissions.unsubscribe(event.sender))
+  }
+
+  // FILES: "Files I can look at" (folder dialog, status, reindex, delete, search).
+  if (services.files) registerFilesIpc({ files: services.files, owns: (id) => windows.owns(id), log: ctx.log })
 }

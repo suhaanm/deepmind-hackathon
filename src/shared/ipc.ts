@@ -18,7 +18,11 @@ import type {
   SessionRequest,
   SessionSource,
 } from './protocol'
+import type { AddFolderResult, FilesSearchResult, FilesStatus } from './files'
+import type { PermissionPane, PermissionStatus } from './permissions'
 import type { Settings, SettingsPatch } from './settings'
+import type { ShellCommand } from './shell'
+import type { ShowtimeApi, ShowtimeCue, ShowtimeStartOptions, ShowtimeState } from './showtime'
 
 export const IPC = {
   // state + settings
@@ -51,6 +55,34 @@ export const IPC = {
   learnerMarkdown: 'learner:markdown', // invoke
   agentCancel: 'agent:cancel', // invoke
   dockMode: 'dock:mode', // invoke
+  // DEMO: Showtime walkthrough
+  showtimeStart: 'showtime:start', // invoke
+  showtimeStop: 'showtime:stop', // invoke
+  showtimeNext: 'showtime:next', // invoke
+  showtimePrev: 'showtime:prev', // invoke
+  showtimePause: 'showtime:pause', // invoke
+  showtimeState: 'showtime:state', // invoke
+  showtimeUpdate: 'showtime:update', // main -> dock+overlay
+  showtimeCue: 'showtime:cue', // main -> dock (narration audio, view cues)
+  // SHELL: macOS permissions + menu bar
+  permissionsStatus: 'permissions:status', // invoke
+  permissionsRequestMicrophone: 'permissions:requestMicrophone', // invoke
+  permissionsRequestScreen: 'permissions:requestScreen', // invoke (runs a capture probe, which makes macOS show its prompt)
+  permissionsRequestAccessibility: 'permissions:requestAccessibility', // sendSync (returns boolean, opens the system prompt)
+  permissionsOpenSettings: 'permissions:openSettings', // send
+  permissionsRelaunch: 'permissions:relaunch', // send
+  permissionsSubscribe: 'permissions:subscribe', // send (main polls only while someone is subscribed)
+  permissionsUnsubscribe: 'permissions:unsubscribe', // send
+  permissionsChanged: 'permissions:changed', // main -> subscriber
+  shellCommand: 'shell:command', // main (tray) -> dock
+  // FILES: "Files I can look at". addFolder opens a native dialog in main; no renderer or model ever supplies a path to read.
+  filesAddFolder: 'files:addFolder', // invoke
+  filesRemoveFolder: 'files:removeFolder', // invoke
+  filesList: 'files:list', // invoke
+  filesStatus: 'files:status', // invoke
+  filesReindex: 'files:reindex', // invoke
+  filesDeleteIndex: 'files:deleteIndex', // invoke
+  filesSearch: 'files:search', // invoke
 } as const
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC]
@@ -71,6 +103,22 @@ export interface IpcInvokeMap {
   [IPC.learnerMarkdown]: { args: [req: MarkdownEditRequest]; result: MarkdownEditResult }
   [IPC.agentCancel]: { args: [id: string]; result: void }
   [IPC.dockMode]: { args: [mode: DockMode]; result: void }
+  [IPC.showtimeStart]: { args: [opts?: ShowtimeStartOptions]; result: void }
+  [IPC.showtimeStop]: { args: []; result: void }
+  [IPC.showtimeNext]: { args: []; result: void }
+  [IPC.showtimePrev]: { args: []; result: void }
+  [IPC.showtimePause]: { args: []; result: void }
+  [IPC.showtimeState]: { args: []; result: ShowtimeState }
+  [IPC.permissionsStatus]: { args: []; result: PermissionStatus }
+  [IPC.permissionsRequestMicrophone]: { args: []; result: boolean }
+  [IPC.permissionsRequestScreen]: { args: []; result: PermissionStatus }
+  [IPC.filesAddFolder]: { args: []; result: AddFolderResult }
+  [IPC.filesRemoveFolder]: { args: [path: string]; result: FilesStatus }
+  [IPC.filesList]: { args: []; result: FilesStatus }
+  [IPC.filesStatus]: { args: []; result: FilesStatus }
+  [IPC.filesReindex]: { args: []; result: FilesStatus }
+  [IPC.filesDeleteIndex]: { args: []; result: FilesStatus }
+  [IPC.filesSearch]: { args: [req: { query: string; k?: number }]; result: FilesSearchResult }
 }
 
 // renderer -> main, fire and forget
@@ -82,6 +130,10 @@ export interface IpcSendMap {
   [IPC.liveTranscript]: [t: LiveTranscript]
   [IPC.liveStatus]: [s: LiveStatus]
   [IPC.confirmAnswer]: [answer: { id: ConfirmRequest['id']; choice: string }]
+  [IPC.permissionsOpenSettings]: [pane: PermissionPane]
+  [IPC.permissionsRelaunch]: []
+  [IPC.permissionsSubscribe]: []
+  [IPC.permissionsUnsubscribe]: []
 }
 
 // main -> renderer
@@ -91,6 +143,10 @@ export interface IpcEventMap {
   [IPC.sessionStart]: [req: SessionRequest]
   [IPC.sessionStop]: [reason: SessionEndReason]
   [IPC.liveInject]: [msg: LiveInject]
+  [IPC.permissionsChanged]: [status: PermissionStatus]
+  [IPC.shellCommand]: [cmd: ShellCommand]
+  [IPC.showtimeUpdate]: [state: ShowtimeState]
+  [IPC.showtimeCue]: [cue: ShowtimeCue]
 }
 
 // Typed helper types for invoke/handle/send/on wrappers (used by preload and src/main/ipc.ts).
@@ -145,4 +201,33 @@ export interface AlongsideApi {
   learnerMarkdown(req: MarkdownEditRequest): Promise<MarkdownEditResult>
   cancelAgent(id: string): Promise<void>
   setDockMode(mode: DockMode): Promise<void>
+
+  // SHELL: macOS permissions (the privacy toggles the app needs) and menu-bar commands
+  permissions: {
+    status(): Promise<PermissionStatus>
+    requestMicrophone(): Promise<boolean>
+    requestAccessibility(): boolean // opens the system prompt; true when already trusted
+    requestScreen(): Promise<PermissionStatus> // runs one capture probe, which makes macOS show its own prompt
+    openSettings(pane: PermissionPane): void
+    relaunch(): void
+    onChange(cb: (status: PermissionStatus) => void): Unsubscribe // main polls only while at least one subscriber exists
+  }
+  shell: {
+    onCommand(cb: (cmd: ShellCommand) => void): Unsubscribe
+  }
+
+  // DEMO: Showtime walkthrough (dock button, narration audio in the dock, roadmap strip in the overlay)
+  showtime: ShowtimeApi
+
+  // FILES: the local index of folders the user chose (read-only, consent per folder)
+  files: {
+    addFolder(): Promise<AddFolderResult> // native folder dialog in main
+    removeFolder(path: string): Promise<FilesStatus>
+    list(): Promise<FilesStatus>
+    status(): Promise<FilesStatus>
+    reindex(): Promise<FilesStatus>
+    deleteIndex(): Promise<FilesStatus>
+    search(query: string, k?: number): Promise<FilesSearchResult>
+    onStatus(cb: (s: FilesStatus) => void): Unsubscribe
+  }
 }

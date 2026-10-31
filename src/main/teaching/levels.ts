@@ -249,13 +249,13 @@ export interface StepCompletion {
 // Called when a step is verified. Adaptive fading as in the expertise-reversal effect: guidance eases off as
 // competence shows (never past base+1 within one attempt, never when the learner chose a level themselves or
 // the level is locked, never when nothing remains) and returns after two struggling steps in a row.
-export function completeStep(s: AttemptLevelState, opts: { remainingSteps: number; locked?: boolean }): StepCompletion {
+export function completeStep(s: AttemptLevelState, opts: { remainingSteps: number; locked?: boolean; maxLevel?: HelpLevel }): StepCompletion {
   const clean = s.stepHints === 0 && s.stepErrors === 0 && s.stepStalls === 0
   const next: AttemptLevelState = { ...s, cleanRun: clean ? s.cleanRun + 1 : 0, struggleRun: clean ? 0 : s.struggleRun + 1 }
   const from = s.current
   if (opts.locked || s.override !== null) return { state: next, change: 'none', from, to: from }
   if (clean && next.cleanRun >= FADE_AFTER_CLEAN_STEPS && opts.remainingSteps > 0) {
-    const ceiling = clampLevel(Math.min(4, s.base + 1))
+    const ceiling = clampLevel(Math.min(opts.maxLevel ?? 4, s.base + 1))
     if (s.current < ceiling) {
       next.current = clampLevel(s.current + 1)
       next.cleanRun = 0

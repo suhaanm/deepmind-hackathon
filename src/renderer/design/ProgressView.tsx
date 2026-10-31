@@ -34,7 +34,7 @@ export function HintsChart({ hints }: { hints: readonly number[] }): ReactElemen
     <div className="al-chart">
       <h3 className="al-h3">Hints I gave you</h3>
       {data.length === 0 ? (
-        <p className="al-muted">After your first lesson, a bar shows how many hints you needed. The bars should get shorter.</p>
+        <p className="al-muted">Your first lesson will show here.</p>
       ) : (
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={description}>
           {ticks.map((v) => (
@@ -61,11 +61,11 @@ export function HintsChart({ hints }: { hints: readonly number[] }): ReactElemen
             )
           })}
           <text x={L + pw / 2} y={H - 6} textAnchor="middle">
-            Task number, oldest to newest
+            Task
           </text>
         </svg>
       )}
-      <p className="al-chart__note">Fewer hints each time means you need me less. That is the goal.</p>
+      <p className="al-chart__note">Fewer hints means you need me less.</p>
     </div>
   )
 }
@@ -86,7 +86,7 @@ export function ConfidenceChart({ ratings }: { ratings: readonly number[] }): Re
     <div className="al-chart">
       <h3 className="al-h3">How you felt</h3>
       {data.length === 0 ? (
-        <p className="al-muted">After each lesson I ask how sure you felt, from 1 (worried) to 5 (confident).</p>
+        <p className="al-muted">Ratings show here after a lesson.</p>
       ) : (
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Line chart. Your own confidence rating from 1 to 5 after each task: ${data.join(', ')}.`}>
           {[1, 3, 5].map((v) => (
@@ -105,7 +105,7 @@ export function ConfidenceChart({ ratings }: { ratings: readonly number[] }): Re
             {data[data.length - 1]} of 5
           </text>
           <text x={L + pw / 2} y={H - 4} textAnchor="middle">
-            How sure you felt, 1 worried to 5 confident
+            How sure you felt
           </text>
         </svg>
       )}
@@ -124,10 +124,11 @@ export function ProgressView({ data }: { data: ProgressData | null }): ReactElem
   return (
     <div className="al-progress">
       {data.overall.attempts > 0 ? <p className="al-h3">{data.overall.headline}</p> : null}
+      {data.doneForMe ? <p className="al-donefor" role="note">{data.doneForMe.text}</p> : null}
       <section className="al-section">
         <h3 className="al-h2">Things you can do now</h3>
         {data.canDoNow.length === 0 ? (
-          <p className="al-muted">Nothing yet. Your first lesson will appear here.</p>
+          <p className="al-muted">Nothing yet.</p>
         ) : (
           <ul className="al-can">
             {data.canDoNow.map((item) => (
@@ -164,7 +165,7 @@ export function ProgressView({ data }: { data: ProgressData | null }): ReactElem
         </ul>
         {next && data.nextSuggested ? (
           <p className="al-muted">
-            Next, if you like: <strong>{next.name}</strong>. {data.nextSuggested.reason}
+            Next: <strong>{next.name}</strong>
           </p>
         ) : null}
       </section>

@@ -70,6 +70,20 @@ describe('overlay store', () => {
     s = advance(s, ctx(8000))
     expect(s.chip).toBeNull()
   })
+  it('chip remembers the previous level (even after it faded) so the echo can animate the change', () => {
+    let s = reduceOverlay(EMPTY_OVERLAY_STATE, { type: 'chip', level: 1, label: 'Watch me' }, ctx(0))
+    expect(s.chip?.from).toBeNull()
+    s = reduceOverlay(s, { type: 'chip', level: 3, label: 'Nudge me' }, ctx(1000))
+    expect(s.chip?.from).toEqual({ level: 1, label: 'Watch me' })
+    s = advance(s, ctx(20_000))
+    s = advance(s, ctx(21_000))
+    expect(s.chip).toBeNull()
+    s = reduceOverlay(s, { type: 'chip', level: 4, label: 'On my own' }, ctx(30_000))
+    expect(s.chip?.from).toEqual({ level: 3, label: 'Nudge me' })
+    // Same level again: nothing to animate.
+    s = reduceOverlay(s, { type: 'chip', level: 4, label: 'On my own' }, ctx(31_000))
+    expect(s.chip?.from).toBeNull()
+  })
   it('advance returns the same object when idle; nextDeadline reports the earliest event', () => {
     const s = reduceOverlay(EMPTY_OVERLAY_STATE, { type: 'show', annotations: [{ ...ring, ttlMs: 1000 }] }, ctx(0))
     expect(advance(s, ctx(10))).toBe(s)

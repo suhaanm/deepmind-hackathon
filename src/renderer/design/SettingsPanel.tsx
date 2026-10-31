@@ -1,14 +1,17 @@
-import type { ReactElement, ReactNode } from 'react'
+import { useState, type ReactElement, type ReactNode } from 'react'
 import type { HelpLevel, PersonaId } from '../../shared/protocol'
 import type { Settings, SettingsPatch } from '../../shared/settings'
 import { annotationStyle, strokeLayers } from './annotation-style'
 import { LEVEL_NAMES } from './levels'
+import { Icon } from './icons'
 import { Segmented, Switch } from './Switch'
 
 export interface SettingsPanelProps {
   settings: Settings
   onChange: (patch: SettingsPatch) => void
   personas: readonly { id: PersonaId; name: string }[]
+  /** Extra rows at the end of "More settings" (files, demo, set up again). */
+  more?: ReactNode
 }
 
 function Group({ title, children }: { title: string; children: ReactNode }): ReactElement {
@@ -22,10 +25,10 @@ function Group({ title, children }: { title: string; children: ReactNode }): Rea
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }): ReactElement {
   return (
-    <div className="al-field">
-      <span className="al-field__label">{label}</span>
-      {hint ? <span className="al-small">{hint}</span> : null}
+    <div className="al-setrow">
+      <span className="al-setrow__label">{label}</span>
       {children}
+      {hint ? <span className="al-small">{hint}</span> : null}
     </div>
   )
 }
@@ -62,78 +65,129 @@ export function AnnotationPreview({ settings }: { settings: Pick<Settings, 'bigA
   )
 }
 
-export function SettingsPanel({ settings, onChange, personas }: SettingsPanelProps): ReactElement {
+export function SettingsPanel({ settings, onChange, personas, more }: SettingsPanelProps): ReactElement {
+  const [moreOpen, setMoreOpen] = useState(false)
   const toggle = (key: keyof Settings) => (checked: boolean) => onChange({ [key]: checked })
   const levels: HelpLevel[] = [1, 2, 3, 4]
   return (
     <div className="al-settings">
-      <Group title="How I help">
-        <Field label="Help level" hint="I step back as you get better. You can keep one level if you prefer.">
-          <Segmented
-            label="Help level mode"
-            value={settings.helpLevelMode}
-            onChange={(helpLevelMode) => onChange({ helpLevelMode })}
-            options={[
-              { value: 'auto', label: 'Adjust for me' },
-              { value: 'locked', label: 'Keep it fixed' },
-            ]}
-          />
-        </Field>
-        {settings.helpLevelMode === 'locked' ? (
-          <Field label="Keep me at">
-            <Segmented label="Help level to keep" value={settings.lockedLevel} onChange={(lockedLevel) => onChange({ lockedLevel })} options={levels.map((l) => ({ value: l, label: LEVEL_NAMES[l] }))} />
-          </Field>
-        ) : null}
-        <Field label="Pace" hint="Gentle gives smaller steps and more time.">
-          <Segmented
-            label="Pace"
-            value={settings.pacing}
-            onChange={(pacing) => onChange({ pacing })}
-            options={[
-              { value: 'gentle', label: 'Gentle' },
-              { value: 'fast', label: 'Quick' },
-            ]}
-          />
-        </Field>
-        <Field label="Voice speed">
-          <input className="al-range" type="range" min={0.75} max={1.25} step={0.05} value={settings.voiceSpeed} aria-label="Voice speed" onChange={(e) => onChange({ voiceSpeed: Number(e.target.value) })} />
-          <span className="al-small" aria-live="polite">
-            {settings.voiceSpeed.toFixed(2).replace(/0$/, '')}{'×'} {settings.voiceSpeed < 0.95 ? 'slower' : settings.voiceSpeed > 1.05 ? 'faster' : 'normal'}
-          </span>
-        </Field>
-        <Switch label="Ask me to explain it back" hint="After a task, I ask you to say it in your own words. You can skip it." checked={settings.teachBack} onChange={toggle('teachBack')} />
-        <Switch label="Explain computer words" hint="I use plain words and say what a term means." checked={settings.explainJargon} onChange={toggle('explainJargon')} />
-        <Switch label="Demo mode" hint="Moves you up a level after one clean try. Normally it takes longer." checked={settings.demoMode} onChange={toggle('demoMode')} />
-      </Group>
-
-      <Group title="What you see and hear">
-        <Switch label="Show captions" hint="Words appear on screen as I speak." checked={settings.captions} onChange={toggle('captions')} />
-        <Switch label="Text only, no speaking" hint="I write instead of talking." checked={settings.textOnly} onChange={toggle('textOnly')} />
-        <Switch label="Big marks on screen" hint="Arrows and circles are drawn larger." checked={settings.bigAnnotations} onChange={toggle('bigAnnotations')} />
-        <Switch label="High contrast" hint="Black and white with thicker lines." checked={settings.highContrast} onChange={toggle('highContrast')} />
-        <Switch label="Easier-to-read font" hint="Switches to OpenDyslexic." checked={settings.dyslexiaFont} onChange={toggle('dyslexiaFont')} />
-        <Field label="Preview of marks on your screen">
-          <AnnotationPreview settings={settings} />
-        </Field>
-      </Group>
-
-      <Group title="Listening">
-        <Switch label="Listen for my name" hint="Only to hear my name. Nothing is sent until you say it." checked={settings.wakeEnabled} onChange={toggle('wakeEnabled')} />
-        <Switch label="Only listen when I press a key" hint="I stay quiet until you press the key." checked={settings.pushToTalkOnly} onChange={toggle('pushToTalkOnly')} />
-        <Switch label="Show the listening light" hint="A light that shows when I can see or hear you." checked={settings.listeningLight} onChange={toggle('listeningLight')} />
-      </Group>
-
-      <Group title="Safety and sharing">
-        <Switch label="Scam check" hint="I can look at a message and point out warning signs." checked={settings.scamShield} onChange={toggle('scamShield')} />
-        <Switch label="Let me do things for you" hint="Off. I teach you instead. If you turn it on, I still ask before every click." checked={settings.doItForMeAllowed} onChange={toggle('doItForMeAllowed')} />
-        <Switch label="Share progress with someone you trust" hint="Off. Nothing is shared. If on, only summaries, never your screen." checked={settings.carerSharing} onChange={toggle('carerSharing')} />
-      </Group>
-
-      <Group title="Who is helping">
-        <Field label="Name to say" hint="Say “Hey” and their name to wake them.">
+      <Group title="Basics">
+        <Field label="Companion">
           <Segmented label="Companion" value={settings.persona ?? personas[0]?.id ?? 'marcus'} onChange={(persona) => onChange({ persona })} options={personas.map((p) => ({ value: p.id, label: p.name }))} />
         </Field>
+        <Field label="Text size">
+          <div className="al-rangewrap">
+            <span aria-hidden="true">Smaller</span>
+            <input className="al-range" type="range" min={0.9} max={1.5} step={0.05} value={settings.textScale} aria-label="Text size" onChange={(e) => onChange({ textScale: Number(e.target.value) })} />
+            <span aria-hidden="true">Larger</span>
+          </div>
+        </Field>
+        <Switch label="Easier-to-read font" hint="OpenDyslexic" checked={settings.dyslexiaFont} onChange={toggle('dyslexiaFont')} />
+        <Field label="Theme">
+          <Segmented
+            label="Theme"
+            value={settings.theme}
+            onChange={(theme) => onChange({ theme })}
+            options={[
+              { value: 'system', label: 'Auto' },
+              { value: 'light', label: 'Light' },
+              { value: 'dark', label: 'Dark' },
+            ]}
+          />
+        </Field>
+        <Switch label="Glass look" checked={settings.glass && !settings.highContrast} onChange={toggle('glass')} disabled={settings.highContrast} />
+        {settings.glass && !settings.highContrast ? (
+          <Field label="See-through">
+            <div className="al-rangewrap">
+              <span aria-hidden="true">More</span>
+              <input className="al-range" type="range" min={0.35} max={1} step={0.05} value={settings.glassOpacity} aria-label="How see-through the glass is" onChange={(e) => onChange({ glassOpacity: Number(e.target.value) })} />
+              <span aria-hidden="true">Less</span>
+            </div>
+          </Field>
+        ) : null}
+        <Switch label="Captions" checked={settings.captions} onChange={toggle('captions')} />
+        <Switch label="High contrast" checked={settings.highContrast} onChange={toggle('highContrast')} />
       </Group>
+
+      <button type="button" className="al-btn al-more" aria-expanded={moreOpen} aria-controls="al-more-settings" onClick={() => setMoreOpen((v) => !v)}>
+        {moreOpen ? 'Fewer settings' : 'More settings'}
+        <Icon name="down" />
+      </button>
+
+      {moreOpen ? (
+        <div id="al-more-settings" className="al-settings">
+          <Group title="Help">
+            <Field label="Help level">
+              <Segmented
+                label="Help level mode"
+                value={settings.helpLevelMode}
+                onChange={(helpLevelMode) => onChange({ helpLevelMode })}
+                options={[
+                  { value: 'auto', label: 'Adjust for me' },
+                  { value: 'locked', label: 'Keep it fixed' },
+                ]}
+              />
+            </Field>
+            {settings.helpLevelMode === 'locked' ? (
+              <Field label="Keep me at">
+                <Segmented label="Help level to keep" value={settings.lockedLevel} onChange={(lockedLevel) => onChange({ lockedLevel })} options={levels.map((l) => ({ value: l, label: LEVEL_NAMES[l] }))} />
+              </Field>
+            ) : null}
+            <Field label="Pace">
+              <Segmented
+                label="Pace"
+                value={settings.pacing}
+                onChange={(pacing) => onChange({ pacing })}
+                options={[
+                  { value: 'gentle', label: 'Gentle' },
+                  { value: 'fast', label: 'Quick' },
+                ]}
+              />
+            </Field>
+            <Field label="Voice speed">
+              <input className="al-range" type="range" min={0.75} max={1.25} step={0.05} value={settings.voiceSpeed} aria-label="Voice speed" onChange={(e) => onChange({ voiceSpeed: Number(e.target.value) })} />
+            </Field>
+            <Switch label="Ask me to explain it back" checked={settings.teachBack} onChange={toggle('teachBack')} />
+            <Switch label="Explain computer words" checked={settings.explainJargon} onChange={toggle('explainJargon')} />
+            <Switch label="Demo mode" hint="Move up after one clean try" checked={settings.demoMode} onChange={toggle('demoMode')} />
+          </Group>
+
+          <Group title="On screen">
+            <Switch label="Big marks" checked={settings.bigAnnotations} onChange={toggle('bigAnnotations')} />
+            <AnnotationPreview settings={settings} />
+            <Switch label="Text only, no speaking" checked={settings.textOnly} onChange={toggle('textOnly')} />
+          </Group>
+
+          <Group title="Listening">
+            <Switch label="Listen for my name" checked={settings.wakeEnabled} onChange={toggle('wakeEnabled')} />
+            <Switch label="Only when I press a key" checked={settings.pushToTalkOnly} onChange={toggle('pushToTalkOnly')} />
+            <Switch label="Show the listening light" checked={settings.listeningLight} onChange={toggle('listeningLight')} />
+          </Group>
+
+          <Group title="Safety">
+            <Switch label="Scam check" checked={settings.scamShield} onChange={toggle('scamShield')} />
+            <Field label="Let me do things for you" hint="Off means I only show you how.">
+              <Segmented
+                label="Let me do things for you"
+                value={settings.agency}
+                onChange={(agency) => onChange({ agency })}
+                options={[
+                  { value: 'off', label: 'Off' },
+                  { value: 'ask_each', label: 'Ask each time' },
+                  { value: 'ask_per_task', label: 'Ask per task' },
+                ]}
+              />
+            </Field>
+          </Group>
+
+          <Group title="Menu bar">
+            <Switch label="Show in the menu bar" checked={settings.showMenuBarIcon} onChange={toggle('showMenuBarIcon')} />
+            <Switch label="Open at login" checked={settings.launchAtLogin} onChange={toggle('launchAtLogin')} />
+          </Group>
+
+          {more}
+        </div>
+      ) : null}
     </div>
   )
 }

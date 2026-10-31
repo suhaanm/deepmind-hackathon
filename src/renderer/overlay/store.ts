@@ -24,6 +24,8 @@ export interface CaptionState {
 export interface ChipState {
   level: HelpLevel
   label: string
+  // What the chip said before this change (null the first time), so the echo can drain/fill from there.
+  from: { level: HelpLevel; label: string } | null
   changedAt: number
   expiresAt: number
   exitingAt: number | null
@@ -33,9 +35,11 @@ export interface OverlayState {
   annotations: ActiveAnnotation[]
   caption: CaptionState | null
   chip: ChipState | null
+  // Survives the chip fading out, so a later level change still animates from the previous level.
+  lastChip: { level: HelpLevel; label: string } | null
 }
 
-export const EMPTY_OVERLAY_STATE: OverlayState = { annotations: [], caption: null, chip: null }
+export const EMPTY_OVERLAY_STATE: OverlayState = { annotations: [], caption: null, chip: null, lastChip: null }
 
 export interface ReduceContext {
   now: number
@@ -110,8 +114,14 @@ export function reduceOverlay(state: OverlayState, cmd: OverlayCommand, ctx: Red
         },
       }
     }
-    case 'chip':
-      return { ...state, chip: { level: cmd.level, label: cmd.label, changedAt: ctx.now, expiresAt: ctx.now + CHIP_VISIBLE_MS, exitingAt: null } }
+    case 'chip': {
+      const from = state.lastChip && state.lastChip.level !== cmd.level ? state.lastChip : null
+      return {
+        ...state,
+        chip: { level: cmd.level, label: cmd.label, from, changedAt: ctx.now, expiresAt: ctx.now + CHIP_VISIBLE_MS, exitingAt: null },
+        lastChip: { level: cmd.level, label: cmd.label },
+      }
+    }
   }
 }
 
@@ -149,7 +159,7 @@ export function advance(state: OverlayState, ctx: ReduceContext): OverlayState {
   }
   const caption = step(state.caption)
   const chip = step(state.chip)
-  return changed ? { annotations, caption, chip } : state
+  return changed ? { ...state, annotations, caption, chip } : state
 }
 
 // Earliest time `advance` has something to do; null when the scene is idle.

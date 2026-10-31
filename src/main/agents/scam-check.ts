@@ -1,11 +1,11 @@
 import { NormBoxSchema } from '../../shared/protocol'
 import type { Annotation, AnnotationTone, GroundResult, NormBox, ScamReport, Shot } from '../../shared/protocol'
-import { AgentUserError, logAgentError } from './errors'
+import { AgentCancelledError, AgentTimeoutError, logAgentError } from './errors'
 import { defineAgent } from './ports'
 import type { AgentOutcome, ScamPorts } from './ports'
 import { cleanText, findInjectionPhrases, inlineSafe, INJECTION_WHY, plainSentences, splitSentences } from './text-safety'
 
-// Covers extract (~4s) + the multi-agent analysis (p95 ~35-40s) + grounding with retries (~8s).
+// Covers the multi-agent analysis (hard cap 20s in the analyst) plus grounding with retries (~8s), with headroom.
 export const SCAM_TIMEOUT_MS = 60_000
 export const HIGHLIGHT_TTL_MS = 25_000
 export const MAX_FLAGS = 5
@@ -14,6 +14,8 @@ const FRESH_SHOT_MS = 6000
 const GROUND_CONCURRENCY = 5
 const BUBBLE_MAX_CHARS = 230
 const MIN_WORDS_TO_SPLIT = 5
+// The advice bubble waits this long for slow groundings before it is drawn without them.
+const BUBBLE_WAIT_MS = 5000
 
 export const HUMAN_CHECK_LINE =
   'Before you do anything, ring the number on the back of your bank card, or ask Age UK or someone you trust.'
@@ -103,27 +105,20 @@ function fitSentences(sentences: string[], maxChars: number): string {
   return kept.join(' ')
 }
 
-export function buildHighlights(
-  agentId: string,
-  report: ScamReport,
-  located: NormBox[][],
-  ttlMs = HIGHLIGHT_TTL_MS,
-): Annotation[] {
-  const tone = toneFor(report.verdict)
-  const annotations: Annotation[] = []
-  located.forEach((boxes, i) => {
-    const flag = report.redFlags[i]
-    const [first, ...rest] = boxes
-    if (!first || !flag) return
-    annotations.push({ id: `${agentId}-flag-${i}`, kind: 'highlightText', tone, ttlMs, boxes: [first, ...rest], note: inlineSafe(flag.why, 90) })
-  })
-  const lowest = located.flat().reduce<NormBox | undefined>((acc, b) => (!acc || b.ymax > acc.ymax ? b : acc), undefined)
+export function highlightAnnotation(agentId: string, report: ScamReport, flag: Flag, index: number, boxes: NormBox[], ttlMs = HIGHLIGHT_TTL_MS): Annotation {
+  const [first, ...rest] = boxes
+  if (!first) throw new Error('highlight needs at least one box')
+  return { id: `${agentId}-flag-${index}`, kind: 'highlightText', tone: toneFor(report.verdict), ttlMs, boxes: [first, ...rest], note: inlineSafe(flag.why, 90) }
+}
+
+/** Sits just below the lowest highlighted phrase, or near the top when nothing could be located. */
+export function adviceBubble(agentId: string, report: ScamReport, located: NormBox[], ttlMs = HIGHLIGHT_TTL_MS): Annotation {
+  const lowest = located.reduce<NormBox | undefined>((acc, b) => (!acc || b.ymax > acc.ymax ? b : acc), undefined)
   const at = lowest
     ? { x: clamp((lowest.xmin + lowest.xmax) / 2, 160, 840), y: clamp(lowest.ymax + 30, 70, 930) }
     : { x: 500, y: 140 }
   const text = fitSentences([VERDICT_LINE[report.verdict], ...report.advice.slice(0, 2).flatMap((a) => splitSentences(a))], BUBBLE_MAX_CHARS)
-  annotations.push({ id: `${agentId}-advice`, kind: 'bubble', tone, ttlMs, at, text })
-  return annotations
+  return { id: `${agentId}-advice`, kind: 'bubble', tone: toneFor(report.verdict), ttlMs, at, text }
 }
 
 function createLimiter(max: number): <T>(work: () => Promise<T>) => Promise<T> {
@@ -143,12 +138,14 @@ function createLimiter(max: number): <T>(work: () => Promise<T>) => Promise<T> {
 
 type Located = NormBox | 'missing' | 'error'
 
-async function groundOnce(ports: ScamPorts, phrase: string, shot: Shot, limit: ReturnType<typeof createLimiter>): Promise<Located> {
+const WRAP_HINT = 'The text may wrap onto a second line. If it does, return one box that covers all of it.'
+
+async function groundOnce(ports: ScamPorts, phrase: string, shot: Shot, limit: ReturnType<typeof createLimiter>, mayWrap = false): Promise<Located> {
   try {
-    const result = await limit(() => ports.ground(`the text "${phrase.replace(/"/g, "'")}"`, shot))
+    const result = await limit(() => ports.ground(`the text "${phrase.replace(/"/g, "'")}"`, shot, mayWrap ? WRAP_HINT : undefined))
     return validBox(result) ?? 'missing'
   } catch (err) {
-    logAgentError('scam_check.ground', err)
+    if (!(err instanceof AgentCancelledError || err instanceof AgentTimeoutError)) logAgentError('scam_check.ground', err)
     return 'error'
   }
 }
@@ -158,25 +155,24 @@ async function groundOnce(ports: ScamPorts, phrase: string, shot: Shot, limit: R
  * so a long miss is retried as two halves; highlightText takes several boxes for exactly this case.
  */
 async function locatePhrase(ports: ScamPorts, phrase: string, shot: Shot, limit: ReturnType<typeof createLimiter>): Promise<NormBox[]> {
-  const whole = await groundOnce(ports, phrase, shot, limit)
-  if (typeof whole === 'object') return [whole]
   const words = phrase.split(/\s+/).filter(Boolean)
+  const whole = await groundOnce(ports, phrase, shot, limit, words.length >= MIN_WORDS_TO_SPLIT)
+  if (typeof whole === 'object') return [whole]
   if (whole === 'error' || words.length < MIN_WORDS_TO_SPLIT) return []
   const mid = Math.ceil(words.length / 2)
   const halves = await Promise.all([words.slice(0, mid), words.slice(mid)].map((part) => groundOnce(ports, part.join(' '), shot, limit)))
   return halves.filter((h): h is NormBox => typeof h === 'object')
 }
 
-async function readMessage(
-  ports: ScamPorts,
-  payload: { text?: string; url?: string },
-): Promise<{ text: string; shot?: Shot }> {
-  const given = payload.text ? cleanText(payload.text, MAX_MESSAGE_CHARS) : ''
-  if (given) return { text: given }
-  ports.progress('Reading the message…')
-  const shot = await ports.grabScreen()
-  const text = await ports.extractMessage(shot).then((t) => cleanText(t, MAX_MESSAGE_CHARS), () => '')
-  return { text, shot }
+/** Resolves when `work` settles or after `ms`, whichever comes first. */
+function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    void work.finally(() => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
 }
 
 export const scamCheckAgent = defineAgent<ScamPorts>({
@@ -199,11 +195,11 @@ export const scamCheckAgent = defineAgent<ScamPorts>({
     return {
       settings: () => deps.settings(),
       grabScreen: () => guard(deps.capture.grab('ground')),
-      extractMessage: (shot) => guard(deps.model.extractMessage({ shot, signal: scope.signal })),
       analyze: (req) => guard(deps.scam.analyze(req, { onProgress: reportStage })),
       progress: reportStage,
       // precise = flash-first grounding, required for the scam path (phrases sit inside dense text).
-      ground: (target, shot) => guard(deps.grounder.ground({ target, shot, precise: true })),
+      ground: (target, shot, hint) => guard(deps.grounder.ground({ target, shot, precise: true, ...(hint ? { hint } : {}) })),
+      announce: scope.announce,
       showHighlights: (annotations, ttlMs) => scope.highlights.show(annotations, ttlMs),
       now: scope.now,
     }
@@ -214,32 +210,36 @@ export const scamCheckAgent = defineAgent<ScamPorts>({
       return { summary: REFUSAL_SCAM_OFF, tell: `${REFUSAL_SCAM_OFF} Tell the user this plainly.` }
     }
 
-    const message = await readMessage(ports, payload)
-    if (!message.text && !message.shot) {
-      throw new AgentUserError('I could not find a message to check. Please open it on your screen and ask me again.')
-    }
+    // Dictated text is analysed as text. Otherwise the analyst reads the screenshot itself (no separate OCR step).
+    const text = payload.text ? cleanText(payload.text, MAX_MESSAGE_CHARS) : ''
+    const shot = text ? undefined : await ports.grabScreen()
     const url = payload.url
     ports.progress('Checking the message…')
-    const raw = await ports.analyze(
-      message.text ? { text: message.text, ...(message.shot ? { shot: message.shot } : {}), ...(url ? { url } : {}) } : { shot: message.shot, ...(url ? { url } : {}) },
-    )
-    const report = sanitizeReport(applyInjectionGuard(raw, message.text))
+    const raw = await ports.analyze({ ...(text ? { text } : { shot }), ...(url ? { url } : {}) })
+    const report = sanitizeReport(applyInjectionGuard(raw, text))
 
-    // The analysis can take seconds; the user may have scrolled, so ground on a fresh shot.
-    const groundShot =
-      message.shot && ports.now() - message.shot.takenAt < FRESH_SHOT_MS ? message.shot : await ports.grabScreen()
-    ports.progress('Marking the worrying parts…')
-    const limit = createLimiter(GROUND_CONCURRENCY)
-    const located = await Promise.all(report.redFlags.slice(0, MAX_FLAGS).map((flag) => locatePhrase(ports, flag.phrase, groundShot, limit)))
-    ports.showHighlights(buildHighlights(agentId, report, located), HIGHLIGHT_TTL_MS)
-
+    // The spoken result goes out the moment the report exists; highlights follow as each phrase is located.
     const summary = buildSummary(report)
-    const marked = located.filter((boxes) => boxes.length > 0).length
-    const onScreen = marked === 0 ? '' : ` ${marked} worrying ${marked === 1 ? 'part is' : 'parts are'} marked on the screen.`
-    return {
+    const outcome: AgentOutcome = {
       summary,
       result: { kind: 'scam_check', report },
-      tell: `${summary}${onScreen} Say it in two short sentences, in your own words, without reassuring them about the message.`,
+      tell: `${summary} The worrying parts will be marked on the screen where I can find them. Say it in two short sentences, in your own words, without reassuring them about the message.`,
     }
+    ports.announce(outcome)
+
+    // The analysis took seconds and the user may have scrolled, so ground on a fresh shot.
+    const groundShot = shot && ports.now() - shot.takenAt < FRESH_SHOT_MS ? shot : await ports.grabScreen()
+    const flags = report.redFlags.slice(0, MAX_FLAGS)
+    const located: NormBox[][] = flags.map(() => [])
+    const limit = createLimiter(GROUND_CONCURRENCY)
+    const tasks = flags.map(async (flag, i) => {
+      const boxes = await locatePhrase(ports, flag.phrase, groundShot, limit)
+      located[i] = boxes
+      if (boxes.length > 0) ports.showHighlights([highlightAnnotation(agentId, report, flag, i, boxes)], HIGHLIGHT_TTL_MS)
+    })
+    await settleWithin(Promise.all(tasks), BUBBLE_WAIT_MS)
+    ports.showHighlights([adviceBubble(agentId, report, located.flat())], HIGHLIGHT_TTL_MS)
+    await Promise.all(tasks)
+    return outcome
   },
 })

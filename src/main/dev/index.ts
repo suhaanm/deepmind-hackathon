@@ -85,27 +85,16 @@ export function installDev({ ctx, services }: DevDeps): void {
   const injectLog: { t: number; text: string; interrupt?: boolean }[] = []
   let stage: BrowserWindow | null = null
 
-  // Record what the overlay was asked to draw; the real controller still runs.
-  const overlay = services.overlay
-  const show = overlay.show.bind(overlay)
-  const clear = overlay.clear.bind(overlay)
-  overlay.show = (annotations) => {
-    overlayLog.push({ t: Date.now(), op: 'show', annotations })
-    show(annotations)
-  }
-  overlay.clear = (ids) => {
-    overlayLog.push({ t: Date.now(), op: 'clear', ids })
-    clear(ids)
-  }
-  const caption = overlay.caption.bind(overlay)
-  const chip = overlay.chip.bind(overlay)
-  overlay.caption = (speaker, text, final) => {
-    overlayLog.push({ t: Date.now(), op: 'caption', speaker, text })
-    caption(speaker, text, final)
-  }
-  overlay.chip = (level, label) => {
-    overlayLog.push({ t: Date.now(), op: 'chip', level, text: label })
-    chip(level, label)
+  // Record every command that reaches the overlay window, whoever sent it (dispatcher, lesson runner, agents): wrapping ctx.sendOverlay
+  // sees them all, whereas wrapping services.overlay misses callers that kept their own reference to the method.
+  const sendOverlay = ctx.sendOverlay.bind(ctx)
+  ctx.sendOverlay = (cmd) => {
+    const t = Date.now()
+    if (cmd.type === 'show') overlayLog.push({ t, op: 'show', annotations: cmd.annotations })
+    else if (cmd.type === 'clear') overlayLog.push({ t, op: 'clear', ids: cmd.ids })
+    else if (cmd.type === 'caption') overlayLog.push({ t, op: 'caption', speaker: cmd.speaker, text: cmd.text })
+    else overlayLog.push({ t, op: 'chip', level: cmd.level, text: cmd.label })
+    sendOverlay(cmd)
   }
   const live = services.live
   const inject = live.inject.bind(live)
@@ -170,13 +159,19 @@ export function installDev({ ctx, services }: DevDeps): void {
     return stage.webContents.executeJavaScript(js, true) as Promise<T>
   }
 
-  async function openStage(): Promise<{ viewport: { w: number; h: number }; display: { w: number; h: number; scale: number } }> {
+  async function openStage(): Promise<{ viewport: { w: number; h: number }; display: { w: number; h: number; scale: number }; content: { x: number; y: number; width: number; height: number } }> {
     const display = screen.getPrimaryDisplay()
     if (!stage || stage.isDestroyed()) {
+      // A normal frameless window exactly on the work area (below the menu bar, beside the Dock): nothing covers it in a real desktop
+      // capture, and its content bounds are known exactly, so ground truth maps to display-normalised coordinates without guessing.
       stage = new BrowserWindow({
-        ...display.bounds,
+        ...display.workArea,
         frame: false,
         show: false,
+        resizable: false,
+        movable: false,
+        fullscreenable: false,
+        hasShadow: false,
         backgroundColor: '#ffffff',
         title: 'Alongside QA stage',
         webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
@@ -185,9 +180,11 @@ export function installDev({ ctx, services }: DevDeps): void {
         stage = null
       })
       await stage.loadURL(STAGE_URL)
-      if (process.platform === 'darwin') stage.setSimpleFullScreen(true)
-      stage.showInactive()
+      stage.setBounds(display.workArea)
+      stage.setAlwaysOnTop(true, 'floating')
+      stage.show()
     }
+    stage.moveTop()
     const deadline = Date.now() + 8000
     while (Date.now() < deadline) {
       const ready = await stageEval<boolean>('Boolean(window.__stage || document.querySelector("[data-ground-id]"))').catch(() => false)
@@ -195,7 +192,7 @@ export function installDev({ ctx, services }: DevDeps): void {
       await new Promise((r) => setTimeout(r, 150))
     }
     const viewport = await stageEval<{ w: number; h: number }>('({ w: window.innerWidth, h: window.innerHeight })')
-    return { viewport, display: { w: display.bounds.width, h: display.bounds.height, scale: display.scaleFactor } }
+    return { viewport, display: { w: display.bounds.width, h: display.bounds.height, scale: display.scaleFactor }, content: stage.getContentBounds() }
   }
 
   const server = http.createServer(async (req, res) => {
@@ -219,6 +216,18 @@ export function installDev({ ctx, services }: DevDeps): void {
           return send(200, { ok: true })
         case 'GET /dev/stage/rects':
           return send(200, await stageEval<{ viewport: unknown; rects: GroundTruthRect[] }>(RECTS_JS))
+        case 'GET /dev/stage/screen-rects': {
+          // __stage.rects() (viewport-normalised) mapped to display-normalised through the window's exact content bounds.
+          if (!stage || stage.isDestroyed()) return send(409, { error: 'stage window is not open' })
+          const d = screen.getPrimaryDisplay().bounds
+          const cb = stage.getContentBounds()
+          const vp = await stageEval<{ w: number; h: number }>('({ w: window.innerWidth, h: window.innerHeight })')
+          const raw = await stageEval<Record<string, { xmin: number; ymin: number; xmax: number; ymax: number }>>('JSON.parse(JSON.stringify(window.__stage ? window.__stage.rects() : {}))')
+          const fx = (n: number) => ((cb.x + (n / 1000) * cb.width - d.x) / d.width) * 1000
+          const fy = (n: number) => ((cb.y + (n / 1000) * cb.height - d.y) / d.height) * 1000
+          const rects = Object.fromEntries(Object.entries(raw).map(([id, b]) => [id, { xmin: fx(b.xmin), ymin: fy(b.ymin), xmax: fx(b.xmax), ymax: fy(b.ymax) }]))
+          return send(200, { rects, content: cb, viewport: vp, sizeMatches: Math.abs(vp.w - cb.width) <= 1 && Math.abs(vp.h - cb.height) <= 1 })
+        }
         case 'GET /dev/stage/catalog':
           return send(200, await stageEval<unknown>('JSON.parse(JSON.stringify(window.__stage ? window.__stage.catalog() : []))'))
         case 'GET /dev/stage/flows':
@@ -266,6 +275,21 @@ export function installDev({ ctx, services }: DevDeps): void {
             win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
           }
           return send(200, { clicked: (found as { label: string }).label, synthetic })
+        }
+        case 'POST /dev/dock/api': {
+          // Calls a read-only / allow-listed function of window.alongside in the dock renderer (the same preload API the UI uses).
+          const body = await readJson(req)
+          const apiPath = String(body.path ?? '')
+          const allowed = /^(permissions\.status|files\.(list|status)|getSettings|getState|showtime\.(state|start|stop|next|prev|pause)|learner\.snapshot|agency\.status)$/
+          if (!allowed.test(apiPath)) return send(400, { error: `not allowed: ${apiPath}` })
+          const win = dockWindow()
+          if (!win) return send(404, { error: 'no dock window' })
+          const args = JSON.stringify(Array.isArray(body.args) ? body.args : [])
+          const result = await win.webContents.executeJavaScript(
+            `(async () => { const parts = ${JSON.stringify(apiPath)}.split('.'); let o = window.alongside; for (const p of parts.slice(0, -1)) o = o && o[p]; const f = o && o[parts[parts.length - 1]]; if (typeof f !== 'function') return { __missing: true }; const r = await f.apply(o, ${args}); return r === undefined ? null : JSON.parse(JSON.stringify(r)) })()`,
+            true,
+          )
+          return send(200, { result })
         }
         case 'GET /dev/learner':
           return send(200, services.learner.snapshot())

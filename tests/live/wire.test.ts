@@ -96,6 +96,11 @@ describe('tool declarations', () => {
     expect(LIVE_TOOLS.map((t) => t.name).sort()).toEqual([...SHARED_TOOL_NAMES].sort())
   })
 
+  it('have unique names (a duplicate declaration would make the server refuse the setup)', () => {
+    const names = LIVE_TOOLS.map((t) => t.name)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
   it('are NON_BLOCKING except ask_user_confirm', () => {
     for (const t of LIVE_TOOLS) expect(t.behavior).toBe(t.name === 'ask_user_confirm' ? 'BLOCKING' : 'NON_BLOCKING')
     expect(isBlockingTool('ask_user_confirm')).toBe(true)

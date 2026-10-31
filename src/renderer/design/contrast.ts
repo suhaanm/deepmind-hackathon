@@ -66,6 +66,7 @@ export interface ThemeKey {
   dark: boolean;
   highContrast: boolean;
   persona?: 'marcus' | 'amelia';
+  glass?: boolean;
 }
 
 function matches(selector: string, key: ThemeKey): boolean {
@@ -75,6 +76,7 @@ function matches(selector: string, key: ThemeKey): boolean {
     if (name === 'theme') return value === (key.dark ? 'dark' : 'light');
     if (name === 'high-contrast') return value === String(key.highContrast);
     if (name === 'persona') return value === key.persona;
+    if (name === 'glass') return value === String(key.glass ?? false);
     return false;
   });
 }
@@ -93,4 +95,18 @@ export function resolveTheme(css: string, key: ThemeKey): TokenMap {
   const out: TokenMap = {};
   for (const [name, value] of Object.entries(merged)) out[name] = resolve(value);
   return out;
+}
+
+/** Opaque result of painting `fg` at `alpha` over `backdrop` (for checking text over translucent glass). */
+export function blend(fg: string, alpha: number, backdrop: string): string {
+  const [r, g, b] = parseHex(fg);
+  const [br, bg, bb] = parseHex(backdrop);
+  const mix = (a: number, c: number): string => Math.round(a * alpha + c * (1 - alpha)).toString(16).padStart(2, '0');
+  return `#${mix(r, br)}${mix(g, bg)}${mix(b, bb)}`;
+}
+
+/** Reads `color-mix(in srgb, #hex var(--glass-x), transparent)` as the hex and which glass variable sets its alpha. */
+export function parseGlassMix(value: string): { hex: string; layer: 'shell' | 'card' } | null {
+  const m = /^color-mix\(in srgb, (#[0-9a-f]{6}) var\(--glass-(shell|card)\), transparent\)$/i.exec(value.trim());
+  return m ? { hex: m[1]!, layer: m[2] as 'shell' | 'card' } : null;
 }

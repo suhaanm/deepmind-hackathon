@@ -15,8 +15,11 @@ import {
   functionCallsOf,
   GeminiError,
   imageInput,
+  isEnvironmental,
   jsonFormat,
   parseModelJson,
+  plainFailure,
+  withSafeLog,
   type GeminiDeps,
 } from './client'
 import { boxAroundPoint, boxCenter, boxProblem, fromComputerUsePoint, fromGeminiBox } from './grounding-utils'
@@ -98,7 +101,8 @@ export function shortLabel(label: string | undefined, target: string): string {
   return words(clean(target).replace(/^(the|a|an)\s+/i, ''), 5) || 'Here'
 }
 
-export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): GrounderWithPreset {
+export function createGrounder(rawDeps: GeminiDeps, config: GroundConfig = {}): GrounderWithPreset {
+  const deps = withSafeLog(rawDeps)
   const preset: GroundPreset = config.preset ?? 'fast'
   const resolution = config.resolution ?? 'high'
   const timeoutMs = config.timeoutMs ?? 6000
@@ -212,14 +216,17 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
         if (second.found || !first?.found) return second
         return first
       } catch (e) {
-        deps.log('grounder', `escalation failed: ${e instanceof Error ? e.message : String(e)}`)
+        deps.log('grounder', `escalation failed (${e instanceof GeminiError ? e.code : 'error'})`)
       }
     }
     if (first) return first
-    deps.log('grounder', `box call failed (${firstError instanceof Error ? firstError.message : String(firstError)}); trying computer_use fallback`)
+    deps.log('grounder', `box call failed (${firstError instanceof GeminiError ? firstError.code : 'error'}); trying computer_use fallback`)
     const remaining = Math.max(0, timeoutMs - (Date.now() - started))
     const fb = await cuFallback(shot, target, remaining, started)
-    return fb ?? notFound('I could not pin down where that is on the screen.', started, primaryModel)
+    if (fb) return fb
+    // Say what is actually wrong when it is the connection or setup; never invent a location either way.
+    const why = isEnvironmental(firstError) ? `${plainFailure(firstError)} So I can't look at the screen.` : 'I could not pin down where that is on the screen.'
+    return notFound(why, started, primaryModel)
   }
 
   const keyFor = (shot: Shot, target: string, mode: Mode) => `${hashShot(shot)}|${normaliseTarget(target)}|${mode}`
@@ -265,7 +272,7 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
       const norm = normaliseTarget(target)
       const mode = modeFor(precise)
       const finish = (r: GroundResult): GroundResult => {
-        deps.log('grounder', `ground "${target.slice(0, 60)}" mode=${mode} found=${r.found} conf=${r.confidence.toFixed(2)} model=${r.model} ${r.latencyMs}ms${r.reason && !r.found ? ` reason="${r.reason.slice(0, 60)}"` : ''}`)
+        deps.log('grounder', `ground target=${norm.length}chars mode=${mode} found=${r.found} conf=${r.confidence.toFixed(2)} model=${r.model} ${r.latencyMs}ms`)
         return r
       }
       if (!norm) return finish(notFound('Nothing to look for.', started))
@@ -297,7 +304,7 @@ export function createGrounder(deps: GeminiDeps, config: GroundConfig = {}): Gro
           const { key } = start(s, target, undefined, mode)
           prefetched.set(prefKey(norm, mode), { key, at: Date.now() })
         } catch (e) {
-          deps.log('grounder', `prefetch skipped: ${e instanceof Error ? e.message : String(e)}`)
+          deps.log('grounder', `prefetch skipped (${e instanceof GeminiError ? e.code : 'error'})`)
         }
       })()
     },

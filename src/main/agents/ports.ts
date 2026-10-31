@@ -10,10 +10,10 @@ export interface GroundedAnswer {
   sources: string[]
 }
 
-// The only model calls agents can make: a Search-grounded text answer, and reading a message off a screenshot.
+// The only model call agents make themselves: a Search-grounded text answer. Reading messages off the screen is
+// done by the ScamAnalyst, which sees the screenshot directly.
 export interface AgentModelPort {
   searchAnswer(req: { system: string; prompt: string; signal: AbortSignal }): Promise<GroundedAnswer>
-  extractMessage(req: { shot: Shot; signal: AbortSignal }): Promise<string>
 }
 
 export interface ExportFs {
@@ -44,6 +44,9 @@ export interface PortScope {
   now: () => number
   // Replaces the running chip's summary (status stays 'running'); ignored once the agent is settled or stopped.
   progress(message: string): void
+  // Hands the result over now (chip -> done, [AGENT_RESULT] injected) while the agent keeps running, so slow
+  // follow-up work such as drawing highlights never delays what the assistant says. Only the first call counts.
+  announce(outcome: AgentOutcome): void
   // Overlay highlights are tracked per agent so cancel/timeout/clear_annotations can remove them.
   highlights: {
     show(annotations: Annotation[], ttlMs: number): void
@@ -53,10 +56,10 @@ export interface PortScope {
 export interface ScamPorts {
   settings(): Settings
   grabScreen(): Promise<Shot>
-  extractMessage(shot: Shot): Promise<string>
   analyze(req: { text?: string; shot?: Shot; url?: string }): Promise<ScamReport>
   progress(message: string): void
-  ground(target: string, shot: Shot): Promise<GroundResult>
+  announce(outcome: AgentOutcome): void
+  ground(target: string, shot: Shot, hint?: string): Promise<GroundResult>
   showHighlights(annotations: Annotation[], ttlMs: number): void
   now(): number
 }

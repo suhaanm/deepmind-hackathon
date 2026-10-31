@@ -18,6 +18,8 @@ export interface ScenePlan {
   ghosts: Map<string, Pt[]>
   // Keys: `${annotationId}:label` (ring), `${annotationId}:bubble`, `${annotationId}:note` (highlightText).
   labels: Map<string, PlacedLabel>
+  // Rects of every mark (rings, badges, ticks, arrows, highlights, spotlight cut-outs): what the captions must not cover.
+  marks: Rect[]
 }
 
 export interface ChromeRects {
@@ -37,6 +39,16 @@ export function chipRect(size: Size, vp: Size, top: number): Rect {
 
 export const CHIP_TOP = 56
 
+// Captions live at the bottom, but the learner's targets often do too (call controls, Dock). When a mark would be
+// covered, the band moves to the top, below the level chip, unless that covers more.
+export function chooseCaptionRect(marks: Rect[], size: Size, vp: Size, style: AnnotationStyle, chip?: Rect): { rect: Rect; atTop: boolean } {
+  const bottom = captionRect(size, vp, style)
+  const cover = (r: Rect): number => marks.reduce((sum, m) => sum + overlapArea(inflate(r, 10), m), 0)
+  if (cover(bottom) === 0) return { rect: bottom, atTop: false }
+  const top: Rect = { x: bottom.x, y: chip ? chip.y + chip.h + 14 : CHIP_TOP, w: size.width, h: size.height }
+  return cover(top) < cover(bottom) ? { rect: top, atTop: true } : { rect: bottom, atTop: false }
+}
+
 export function planScene(entries: ActiveAnnotation[], vp: Size, style: AnnotationStyle, sizes: Record<string, Size>, chrome: ChromeRects = {}): ScenePlan {
   const plan: ScenePlan = {
     rings: new Map(),
@@ -47,6 +59,7 @@ export function planScene(entries: ActiveAnnotation[], vp: Size, style: Annotati
     highlights: new Map(),
     ghosts: new Map(),
     labels: new Map(),
+    marks: [],
   }
   const obstacles: Rect[] = []
   const note = (_id: string, r: Rect): void => {
@@ -126,6 +139,7 @@ export function planScene(entries: ActiveAnnotation[], vp: Size, style: Annotati
     })
   }
 
+  plan.marks = [...obstacles]
   if (chrome.caption) obstacles.push(chrome.caption)
   if (chrome.chip) obstacles.push(chrome.chip)
 

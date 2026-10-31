@@ -55,6 +55,8 @@ export class LiveConnection {
   private expectedClose = false
   private superseded = new WeakSet<WebSocket>()
   private handingOver = false
+  // Socket still waiting for setupComplete; close() must be able to cancel it.
+  private pending: WebSocket | null = null
   private readonly WS: typeof WebSocket
   private readonly log: (...a: unknown[]) => void
 
@@ -89,11 +91,15 @@ export class LiveConnection {
     this.expectedClose = true
     this.state = 'closed'
     const s = this.sock
+    const p = this.pending
     this.sock = null
-    try {
-      s?.close(code, reason)
-    } catch {
-      /* already closed */
+    this.pending = null
+    for (const sock of [s, p]) {
+      try {
+        sock?.close(code, reason)
+      } catch {
+        /* already closed */
+      }
     }
   }
 
@@ -102,13 +108,19 @@ export class LiveConnection {
     return new Promise<WebSocket>((resolve, reject) => {
       withTimeout(this.opts.getAuth(), this.opts.setupTimeoutMs ?? 10_000, 'Live token request timed out')
         .then((auth) => {
+          if (this.expectedClose) {
+            reject(new Error('Live connection closed'))
+            return
+          }
           const ws = new this.WS(liveUrl(auth))
+          this.pending = ws
           ws.binaryType = 'arraybuffer'
           let ready = false
           let settled = false
           const fail = (why: string) => {
             if (settled) return
             settled = true
+            if (this.pending === ws) this.pending = null
             clearTimeout(timer)
             try {
               ws.close()
@@ -129,6 +141,7 @@ export class LiveConnection {
               if (events.some((e) => e.type === 'setupComplete')) {
                 ready = true
                 settled = true
+                if (this.pending === ws) this.pending = null
                 clearTimeout(timer)
                 resolve(ws)
               }
@@ -198,6 +211,7 @@ export class LiveConnection {
       this.opts.onClosed({ code, reason, expected: true })
       return
     }
+    this.log('socket lost', code, reason, `handle=${this.handle ? 'yes' : 'none'}`)
     this.sock = null
     void this.reconnectLoop(code, reason, 'dropped')
   }

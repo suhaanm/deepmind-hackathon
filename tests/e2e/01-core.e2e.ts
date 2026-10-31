@@ -1,6 +1,8 @@
 // (a) Core loop through the debug HTTP: health, state, point_at (found / not found), argument errors, shots, dock render.
+import fs from 'node:fs'
+import path from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { MODE, REAL, VISIBLE, clearOverlayLog, dbg, dev, overlayLog, resetApp, shownBoxes, state, tool, uglyText } from './helpers'
+import { MODE, REAL, REPO, VISIBLE, clearOverlayLog, dbg, dev, overlayLog, resetApp, shownBoxes, state, tool, uglyText } from './helpers'
 
 describe('core loop', () => {
   beforeAll(async () => {
@@ -44,7 +46,11 @@ describe('core loop', () => {
     for (const v of [box.xmin, box.ymin, box.xmax, box.ymax]) expect(v).toBeGreaterThanOrEqual(0)
     for (const v of [box.xmin, box.ymin, box.xmax, box.ymax]) expect(v).toBeLessThanOrEqual(1000)
     const kinds = log.filter((o) => o.op === 'show').flatMap((o) => (o.annotations ?? []).map((a) => a.kind))
-    expect(kinds).toEqual(expect.arrayContaining(['ring', 'arrow', 'badge']))
+    // The numbered badge is drawn by the overlay from ring.step (no separate badge annotation).
+    expect(kinds).toEqual(expect.arrayContaining(['ring', 'arrow']))
+    expect(kinds).not.toContain('badge')
+    const lastRing = log.filter((o) => o.op === 'show').flatMap((o) => o.annotations ?? []).filter((a) => a.kind === 'ring').pop() as { step?: number } | undefined
+    expect(lastRing?.step).toBe(2)
     expect(ms).toBeLessThan(15_000)
   })
 
@@ -78,6 +84,10 @@ describe('core loop', () => {
     expect(res.status).toBe(200)
     const buf = Buffer.from(await res.arrayBuffer())
     expect([buf[0], buf[1]]).toEqual([0xff, 0xd8])
+    if (REAL) {
+      fs.mkdirSync(path.join(REPO, 'docs', 'qa-shots'), { recursive: true })
+      fs.writeFileSync(path.join(REPO, 'docs', 'qa-shots', 'core-shot.jpg'), buf)
+    }
     expect(Number(res.headers.get('x-shot-width'))).toBeGreaterThan(0)
     expect(Number(res.headers.get('x-shot-height'))).toBeGreaterThan(0)
     if (REAL) expect(Number(res.headers.get('x-shot-width'))).toBeLessThanOrEqual(1920)

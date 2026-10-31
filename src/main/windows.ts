@@ -13,6 +13,11 @@ export interface Windows {
   sendOverlay<C extends EventChannel>(channel: C, ...args: EventArgs<C>): void
   broadcast<C extends EventChannel>(channel: C, ...args: EventArgs<C>): void
   setDockMode(mode: DockMode): void
+  // SHELL (menu bar): the dock window itself can be hidden and brought back; closing it only hides it.
+  showDock(): void
+  hideDock(): void
+  isDockVisible(): boolean
+  getDockMode(): DockMode
   owns(webContentsId: number): boolean
   overlayPng(): Promise<Buffer | null>
   dockPng(): Promise<Buffer | null>
@@ -53,7 +58,10 @@ export function createWindows(opts: WindowOptions): Windows {
     fullscreenable: false,
     alwaysOnTop: true,
     skipTaskbar: false,
-    backgroundColor: '#ffffff',
+    // Transparent so the dock's "glass" setting can show the desktop (macOS vibrancy blurs it); the page paints solid when glass is off.
+    transparent: true,
+    backgroundColor: '#00000000',
+    ...(process.platform === 'darwin' ? { vibrancy: 'under-window' as const, visualEffectState: 'active' as const } : {}),
     title: 'Alongside',
     webPreferences: {
       preload: preloadPath(),
@@ -101,6 +109,13 @@ export function createWindows(opts: WindowOptions): Windows {
     if (!opts.headless) overlay.once('ready-to-show', () => overlay?.showInactive())
   }
 
+  // Our windows never navigate away from the bundled UI and never open new windows (a link or script cannot load a remote page into them).
+  for (const win of [dock, overlay]) {
+    if (!win) continue
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    win.webContents.on('will-navigate', (event) => event.preventDefault())
+  }
+
   // Our own windows may use the mic/camera/screen; nothing else may.
   const ours = (id: number | undefined) => id !== undefined && (id === dock.webContents.id || id === overlay?.webContents.id)
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
@@ -117,7 +132,16 @@ export function createWindows(opts: WindowOptions): Windows {
     return (await win.webContents.capturePage()).toPNG()
   }
 
+  // The app lives in the menu bar: closing the dock only hides it. Quit (tray, Cmd+Q) destroys it below.
+  let quitting = false
+  dock.on('close', (event) => {
+    if (quitting) return
+    event.preventDefault()
+    dock.hide()
+  })
+
   app.on('before-quit', () => {
+    quitting = true
     dock.destroy()
     overlay?.destroy()
   })
@@ -134,6 +158,15 @@ export function createWindows(opts: WindowOptions): Windows {
       dockMode = mode
       dock.setBounds(dockBounds(mode), true)
     },
+    showDock() {
+      if (dock.isDestroyed()) return
+      dock.show()
+    },
+    hideDock() {
+      if (!dock.isDestroyed()) dock.hide()
+    },
+    isDockVisible: () => !dock.isDestroyed() && dock.isVisible(),
+    getDockMode: () => dockMode,
     owns: ours,
     overlayPng: () => capture(overlay),
     dockPng: () => capture(dock),

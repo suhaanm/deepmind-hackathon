@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import type { CompanionState } from '../../shared/protocol'
+import { sessionActive, useScreenBlocked, useShowtimeActive } from './hooks'
 import { LevelChip, PresenceOrb, StopButton, listeningLightState } from '../design'
 
 export interface PillProps {
@@ -11,7 +12,10 @@ export interface PillProps {
 
 /** Collapsed dock: orb with its listening dot, the level chip, and Stop. 72px tall. */
 export function Pill({ state, personaName, onExpand, onStop }: PillProps): ReactElement {
-  const light = state.settings.listeningLight ? listeningLightState(state.phase, state.micMuted) : undefined
+  const screenBlocked = useScreenBlocked()
+  const demoActive = useShowtimeActive()
+  const stoppable = sessionActive(state.phase) || demoActive
+  const light = state.settings.listeningLight ? listeningLightState(state.phase, state.micMuted, screenBlocked) : undefined
   return (
     <div className="al-pill al-drag" role="region" aria-label={`${personaName}, collapsed`}>
       <span className="al-grip" aria-hidden="true" title="Drag to move">
@@ -28,7 +32,7 @@ export function Pill({ state, personaName, onExpand, onStop }: PillProps): React
           <LevelChip level={state.level} locked={state.levelLocked} variant="compact" />
         )}
       </button>
-      <StopButton compact onStop={onStop} />
+      {stoppable ? <StopButton compact onStop={onStop} /> : null}
     </div>
   )
 }

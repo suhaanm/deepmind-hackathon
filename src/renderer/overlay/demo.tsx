@@ -80,6 +80,7 @@ function Demo(): ReactElement {
         speakerNames={{ user: 'You', assistant: 'Marcus' }}
         freezeGhostMs={freeze}
         typeBubbles={!still}
+        chipProgress={fixture.chip}
       />
     </div>
   )

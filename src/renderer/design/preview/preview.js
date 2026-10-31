@@ -19,6 +19,11 @@ const PHASES = {
 
 const S = {
   theme: 'light',
+  themeSetting: 'light',
+  glass: false,
+  glassOpacity: 0.5,
+  textScale: 1,
+  chatMode: 'voice',
   hc: false,
   hcDark: false,
   big: true,
@@ -29,7 +34,7 @@ const S = {
   level: 2,
   locked: false,
   muted: false,
-  tab: 'now',
+  tab: 'chat',
   settings: {
     helpLevelMode: 'auto',
     lockedLevel: 2,
@@ -46,6 +51,9 @@ const S = {
     listeningLight: true,
     demoMode: true,
     wakeEnabled: true,
+    agency: 'off',
+    showMenuBarIcon: true,
+    launchAtLogin: false,
   },
 };
 
@@ -104,14 +112,27 @@ function icon(name) {
 }
 
 /* ---------- root attributes ---------- */
+// Keep in step with src/renderer/design/apply-settings.ts: glass never makes text-bearing areas less than 70% opaque.
+function glassAlphas(opacity) {
+  const o = Math.min(1, Math.max(0.35, opacity));
+  return { shell: 0.7 + 0.3 * ((o - 0.35) / 0.65), card: Math.max(0.94, o) };
+}
+const sysDarkNow = () => matchMedia('(prefers-color-scheme: dark)').matches;
 function applyRoot() {
   const r = document.documentElement;
-  const dark = S.hc ? S.hcDark : S.theme === 'dark';
+  const wantsDark = S.themeSetting === 'auto' ? sysDarkNow() : S.themeSetting === 'dark';
+  S.theme = wantsDark ? 'dark' : 'light';
+  const dark = S.hc ? S.hcDark : wantsDark;
   r.setAttribute('data-theme', dark ? 'dark' : 'light');
   r.setAttribute('data-high-contrast', String(S.hc));
   r.setAttribute('data-big-annotations', String(S.big));
   r.setAttribute('data-dyslexia-font', String(S.dys));
   r.setAttribute('data-persona', S.persona);
+  r.setAttribute('data-glass', String(S.glass && !S.hc));
+  const g = glassAlphas(S.glassOpacity);
+  r.style.setProperty('--glass-shell', (g.shell * 100).toFixed(1) + '%');
+  r.style.setProperty('--glass-card', (g.card * 100).toFixed(1) + '%');
+  r.style.setProperty('--ui-scale', String(S.textScale));
   if (S.reduce) r.setAttribute('data-motion', 'reduced');
   else r.removeAttribute('data-motion');
 }
@@ -712,63 +733,244 @@ function AnnotationPreview() {
   return h('div', { class: 'al-preview' }, svg);
 }
 
-/* ---------- settings ---------- */
+/* ---------- settings: Basics always, everything else under More ---------- */
+let uid = 0;
+function SwitchOn(label, hint, get, setter, disabled) {
+  const id = 'sx' + ++uid;
+  const input = h('input', { type: 'checkbox', role: 'switch', id, onchange: () => setter(input.checked) });
+  const u = () => { input.checked = !!get(); input.disabled = !!(disabled && disabled()); };
+  u();
+  on(u);
+  return h('label', { class: 'al-switch', for: id }, h('span', { class: 'al-switch__text' }, h('span', { class: 'al-switch__label' }, label), hint ? h('span', { class: 'al-switch__hint' }, hint) : null), input, h('span', { class: 'al-switch__track', 'aria-hidden': 'true' }, h('span', { class: 'al-switch__thumb' })));
+}
+function SetRow(label, control, hint) {
+  return h('div', { class: 'al-setrow' }, h('span', { class: 'al-setrow__label' }, label), control, hint ? h('span', { class: 'al-small' }, hint) : null);
+}
+function RangeRow(label, min, max, step, get, setter, left, right) {
+  const input = h('input', { class: 'al-range', type: 'range', min: String(min), max: String(max), step: String(step), 'aria-label': label, oninput: (e) => setter(Number(e.target.value)) });
+  input.value = String(get());
+  on(() => (input.value = String(get())));
+  return SetRow(label, h('div', { class: 'al-rangewrap' }, h('span', { 'aria-hidden': 'true' }, left), input, h('span', { 'aria-hidden': 'true' }, right)));
+}
 function SettingsPanel() {
-  const lockedSeg = Seg('Help level to keep', [[1, 'Watch me'], [2, 'Walk with me'], [3, 'Nudge me'], [4, 'On my own']], () => S.settings.lockedLevel, (v) => { setSetting({ lockedLevel: v }); set({ level: v }); });
-  const lockedField = Field('Keep me at', null, lockedSeg);
-  const upd = () => (lockedField.hidden = S.settings.helpLevelMode !== 'locked');
-  on(upd);
-  upd();
-  const speed = h('input', { class: 'al-range', type: 'range', min: '0.75', max: '1.25', step: '0.05', id: 'voice-speed', 'aria-label': 'Voice speed', oninput: (e) => setSetting({ voiceSpeed: Number(e.target.value) }) });
-  speed.value = String(S.settings.voiceSpeed);
-  const speedLabel = h('span', { class: 'al-small', 'aria-live': 'polite' });
-  const su = () => (speedLabel.textContent = `${S.settings.voiceSpeed.toFixed(2).replace(/0$/, '')}× ${S.settings.voiceSpeed < 0.95 ? 'slower' : S.settings.voiceSpeed > 1.05 ? 'faster' : 'normal'}`);
-  on(su);
-  su();
-  return h('div', { class: 'al-settings' },
-    Group('How I help',
-      Field('Help level', 'I step back as you get better. You can keep one level if you prefer.', Seg('Help level mode', [['auto', 'Adjust for me'], ['locked', 'Keep it fixed']], () => S.settings.helpLevelMode, (v) => {
-        setSetting({ helpLevelMode: v });
-        set({ locked: v === 'locked' });
-      })),
-      lockedField,
-      Field('Pace', 'Gentle gives smaller steps and more time.', Seg('Pace', [['gentle', 'Gentle'], ['fast', 'Quick']], () => S.settings.pacing, (v) => setSetting({ pacing: v }))),
-      Field('Voice speed', null, h('div', {}, speed, speedLabel)),
-      Switch('teachBack', 'Ask me to explain it back', 'After a task, I ask you to say it in your own words. You can skip it.'),
-      Switch('explainJargon', 'Explain computer words', 'I use plain words and say what a term means.'),
-      Switch('demoMode', 'Demo mode', 'Moves you up a level after one clean try. Normally it takes longer.')),
-    Group('What you see and hear',
-      Switch('captions', 'Show captions', 'Words appear on screen as I speak.'),
-      Switch('textOnly', 'Text only, no speaking', 'I write instead of talking.'),
-      h('div', { class: 'al-field' }, (() => {
-        const sw = h('label', { class: 'al-switch', for: 'sw-big' }, h('span', { class: 'al-switch__text' }, h('span', { class: 'al-switch__label' }, 'Big marks on screen'), h('span', { class: 'al-switch__hint' }, 'Arrows and circles are drawn larger.')),
-          h('input', { type: 'checkbox', role: 'switch', id: 'sw-big', checked: S.big, onchange: (e) => set({ big: e.target.checked }) }), h('span', { class: 'al-switch__track', 'aria-hidden': 'true' }, h('span', { class: 'al-switch__thumb' })));
-        on(() => (sw.querySelector('input').checked = S.big));
-        return sw;
-      })()),
-      h('div', { class: 'al-field' }, (() => {
-        const sw = h('label', { class: 'al-switch', for: 'sw-hc' }, h('span', { class: 'al-switch__text' }, h('span', { class: 'al-switch__label' }, 'High contrast'), h('span', { class: 'al-switch__hint' }, 'Black and white with thicker lines.')),
-          h('input', { type: 'checkbox', role: 'switch', id: 'sw-hc', checked: S.hc, onchange: (e) => set({ hc: e.target.checked }) }), h('span', { class: 'al-switch__track', 'aria-hidden': 'true' }, h('span', { class: 'al-switch__thumb' })));
-        on(() => (sw.querySelector('input').checked = S.hc));
-        return sw;
-      })()),
-      h('div', { class: 'al-field' }, (() => {
-        const sw = h('label', { class: 'al-switch', for: 'sw-dys' }, h('span', { class: 'al-switch__text' }, h('span', { class: 'al-switch__label' }, 'Easier-to-read font'), h('span', { class: 'al-switch__hint' }, 'Switches to OpenDyslexic.')),
-          h('input', { type: 'checkbox', role: 'switch', id: 'sw-dys', checked: S.dys, onchange: (e) => set({ dys: e.target.checked }) }), h('span', { class: 'al-switch__track', 'aria-hidden': 'true' }, h('span', { class: 'al-switch__thumb' })));
-        on(() => (sw.querySelector('input').checked = S.dys));
-        return sw;
-      })()),
-      Field('Preview of marks on your screen', null, AnnotationPreview())),
-    Group('Listening',
-      Switch('wakeEnabled', 'Listen for my name', 'Only to hear my name. Nothing is sent until you say it.'),
-      Switch('pushToTalkOnly', 'Only listen when I press a key', 'I stay quiet until you press the key.'),
-      Switch('listeningLight', 'Show the listening light', 'A light that shows when I can see or hear you.')),
-    Group('Safety and sharing',
-      Switch('scamShield', 'Scam check', 'I can look at a message and point out warning signs.'),
-      Switch('doItForMeAllowed', 'Let me do things for you', 'Off. I teach you instead. If you turn it on, I still ask before every click.'),
-      Switch('carerSharing', 'Share progress with someone you trust', 'Off. Nothing is shared. If on, only summaries, never your screen.')),
-    Group('Who is helping',
-      Field('Name to say', 'Say “Hey” and their name to wake them.', Seg('Companion', Object.entries(PERSONAS).map(([id, p]) => [id, p.displayName]), () => S.persona, (v) => set({ persona: v })))));
+  const root = h('div', { class: 'al-settings' });
+  let moreOpen = false;
+  const lockedRow = SetRow('Keep me at', Seg('Help level to keep', [[1, 'Watch me'], [2, 'Walk with me'], [3, 'Nudge me'], [4, 'On my own']], () => S.settings.lockedLevel, (v) => { setSetting({ lockedLevel: v }); set({ level: v }); }));
+  const lockU = () => (lockedRow.hidden = S.settings.helpLevelMode !== 'locked');
+  on(lockU);
+  lockU();
+  const seeRow = RangeRow('See-through', 0.35, 1, 0.05, () => S.glassOpacity, (v) => set({ glassOpacity: v }), 'More', 'Less');
+  const seeU = () => (seeRow.hidden = !(S.glass && !S.hc));
+  on(seeU);
+  seeU();
+  const basics = h('section', { class: 'al-group', 'aria-label': 'Basics' }, h('h3', { class: 'al-eyebrow' }, 'Basics'),
+    SetRow('Companion', Seg('Companion', Object.entries(PERSONAS).map(([id, p]) => [id, p.displayName]), () => S.persona, (v) => set({ persona: v }))),
+    RangeRow('Text size', 0.9, 1.5, 0.05, () => S.textScale, (v) => set({ textScale: v }), 'Smaller', 'Larger'),
+    SwitchOn('Easier-to-read font', 'OpenDyslexic', () => S.dys, (v) => set({ dys: v })),
+    SetRow('Theme', Seg('Theme', [['auto', 'Auto'], ['light', 'Light'], ['dark', 'Dark']], () => S.themeSetting, (v) => set({ themeSetting: v }))),
+    SwitchOn('Glass look', '', () => S.glass && !S.hc, (v) => set({ glass: v }), () => S.hc),
+    seeRow,
+    SwitchOn('Captions', '', () => S.settings.captions, (v) => setSetting({ captions: v })),
+    SwitchOn('High contrast', '', () => S.hc, (v) => set({ hc: v })));
+  const moreBtn = h('button', { class: 'al-btn al-more', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'pv-more-settings', onclick: () => { moreOpen = !moreOpen; draw(); } });
+  const sw = (label, hint, key) => SwitchOn(label, hint, () => S.settings[key], (v) => setSetting({ [key]: v }));
+  const group = (title, ...kids) => h('section', { class: 'al-group', 'aria-label': title }, h('h3', { class: 'al-eyebrow' }, title), ...kids);
+  const more = h('div', { id: 'pv-more-settings', class: 'al-settings' },
+    group('Help',
+      SetRow('Help level', Seg('Help level mode', [['auto', 'Adjust for me'], ['locked', 'Keep it fixed']], () => S.settings.helpLevelMode, (v) => { setSetting({ helpLevelMode: v }); set({ locked: v === 'locked' }); })),
+      lockedRow,
+      SetRow('Pace', Seg('Pace', [['gentle', 'Gentle'], ['fast', 'Quick']], () => S.settings.pacing, (v) => setSetting({ pacing: v }))),
+      RangeRow('Voice speed', 0.75, 1.25, 0.05, () => S.settings.voiceSpeed, (v) => setSetting({ voiceSpeed: v }), 'Slower', 'Faster'),
+      sw('Ask me to explain it back', '', 'teachBack'), sw('Explain computer words', '', 'explainJargon'), sw('Demo mode', 'Move up after one clean try', 'demoMode')),
+    group('On screen', SwitchOn('Big marks', '', () => S.big, (v) => set({ big: v })), AnnotationPreview(), sw('Text only, no speaking', '', 'textOnly')),
+    group('Listening', sw('Listen for my name', '', 'wakeEnabled'), sw('Only when I press a key', '', 'pushToTalkOnly'), sw('Show the listening light', '', 'listeningLight')),
+    group('Safety', sw('Scam check', '', 'scamShield'),
+      SetRow('Let me do things for you', Seg('Let me do things for you', [['off', 'Off'], ['ask_each', 'Ask each time'], ['ask_per_task', 'Ask per task']], () => S.settings.agency || 'off', (v) => setSetting({ agency: v })), 'Off means I only show you how.')),
+    group('Menu bar', sw('Show in the menu bar', '', 'showMenuBarIcon'), sw('Open at login', '', 'launchAtLogin')),
+    group('Other', h('div', { class: 'al-setrow' }, h('button', { class: 'al-btn', type: 'button' }, 'Run demo')), h('div', { class: 'al-setrow' }, h('button', { class: 'al-btn', type: 'button' }, 'Set up again'))));
+  function draw() {
+    moreBtn.setAttribute('aria-expanded', String(moreOpen));
+    moreBtn.replaceChildren(moreOpen ? 'Fewer settings' : 'More settings', icon('down'));
+    root.replaceChildren(basics, moreBtn, ...(moreOpen ? [more] : []));
+  }
+  draw();
+  return root;
+}
+
+/* ---------- profile ("About you"): the learner's own file ---------- */
+const PROFILE_SEED = `# My Alongside profile
+
+> This file is yours. Read it, change it, or delete any line and Alongside will follow what it says here.
+
+## About me & accessibility
+
+- Call me Peggy
+- I find small text hard to read
+
+## Goals
+
+- See my granddaughter Lily on a video call
+- Send photos to my son
+
+## Skills
+
+| Skill | Level |
+|---|---|
+| Start a video call | 2 |
+
+## What works for me
+
+- Comparing the contacts list to a phone book helped
+- Being asked what I would try before being told
+
+## Jargon to avoid
+
+- browser, URL, swipe
+
+## Who can see what
+
+- Nobody sees anything unless you switch on carer sharing in Settings.
+
+## Last session
+
+- yesterday · Start a video call · Found the green Start call button with one hint.
+`;
+const fakeFile = { content: PROFILE_SEED, revision: 1, stale: false };
+function fakeWrite(content, revision) {
+  const out = (ok, conflict) => ({ ok, conflict, content: fakeFile.content, revision: fakeFile.revision });
+  if (fakeFile.stale) {
+    fakeFile.stale = false;
+    fakeFile.content += '\n- (someone changed this file)';
+    fakeFile.revision += 1;
+    return out(false, true);
+  }
+  if (revision !== fakeFile.revision) return out(false, true);
+  fakeFile.content = content;
+  fakeFile.revision += 1;
+  return out(true, false);
+}
+const profileViews = [];
+function ProfileTab() {
+  const root = h('div', { class: 'al-profile' });
+  const st = { doc: { content: fakeFile.content, revision: fakeFile.revision }, notice: '', adds: {}, adding: null, more: false, forgetting: null, editing: false, draft: '', latest: null };
+  const write = (content) => {
+    const r = fakeWrite(content, st.doc.revision);
+    st.doc = { content: r.content, revision: r.revision };
+    profileViews.forEach((v) => v !== api && v.sync());
+    return r.ok ? 'ok' : r.conflict ? 'conflict' : 'rejected';
+  };
+  const STALE = 'This changed while you were looking, so I have loaded the latest. ';
+  const forget = (indices) => {
+    st.forgetting = null;
+    const r = write(removeLines(st.doc.content, indices));
+    st.notice = r === 'ok' ? 'Forgotten.' : STALE + 'Nothing was removed. Please try again.';
+    draw();
+  };
+  function lines(section) {
+    const frag = document.createDocumentFragment();
+    if (section.lines.length === 0) frag.append(h('p', { class: 'al-small' }, 'Nothing written down yet.'));
+    else frag.append(h('ul', { class: 'al-lines' }, section.lines.map((l) => h('li', { class: 'al-line' }, h('span', { class: 'al-line__text' }, l.text),
+      h('button', { class: 'al-btn al-btn--quiet al-line__forget', type: 'button', 'aria-label': 'Forget: ' + l.text, onclick: () => forget([l.index]) }, 'Forget')))));
+    if (section.lines.length > 1) {
+      frag.append(st.forgetting === section.headingIndex
+        ? h('div', { class: 'al-forgetrow', role: 'group', 'aria-label': 'Forget all of these?' }, h('span', {}, `Forget all ${section.lines.length}?`),
+          h('button', { class: 'al-btn', type: 'button', onclick: () => forget(section.lines.map((l) => l.index)) }, 'Yes, forget them'),
+          h('button', { class: 'al-btn al-btn--quiet', type: 'button', onclick: () => { st.forgetting = null; draw(); } }, 'Keep them'))
+        : h('button', { class: 'al-btn al-btn--quiet al-forgetall', type: 'button', onclick: () => { st.forgetting = section.headingIndex; draw(); } }, 'Forget all of these'));
+    }
+    return frag;
+  }
+  function confirmDelete() {
+    const host = root.closest('[data-modal-host]') || document.body;
+    const close = () => modal.remove();
+    const choose = (yes) => (e) => {
+      if (!e.isTrusted) return;
+      close();
+      if (!yes) return;
+      let r = write(blankProfile());
+      if (r === 'conflict') r = write(blankProfile());
+      st.notice = r === 'ok' ? 'Everything is deleted. I start again from nothing.' : 'I could not delete it. Please try again.';
+      draw();
+    };
+    const dlg = h('div', { class: 'al-modal', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'pq', tabindex: '-1' },
+      h('p', { class: 'al-eyebrow' }, 'Please check'),
+      h('h2', { class: 'al-modal__q', id: 'pq' }, 'Delete everything I know about you? This cannot be undone.'),
+      h('div', { class: 'al-modal__choices' }, h('button', { class: 'al-btn al-btn--lg al-btn--danger', type: 'button', onclick: choose(true) }, 'Yes, delete everything'),
+        h('button', { class: 'al-btn al-btn--lg', type: 'button', onclick: choose(false) }, 'No, keep it')),
+      h('p', { class: 'al-modal__note' }, 'Only a click or tap here can answer. Nothing I say or read on screen can.'));
+    const modal = h('div', { class: 'al-scrim' }, dlg);
+    host.append(modal);
+    dlg.focus();
+  }
+  function draw() {
+    const sections = parseProfile(st.doc.content);
+    const kids = [];
+    if (st.notice) kids.push(h('p', { class: 'al-note', role: 'status' }, st.notice));
+    EDITABLE_KEYS.forEach((key) => {
+      const section = sections.find((s) => s.key === key);
+      const copy = SECTION_COPY[key];
+      let tail;
+      if (st.adding === key) {
+        const input = h('input', { class: 'al-input', type: 'text', maxlength: '160', 'aria-label': 'Add to ' + copy.title, oninput: (e) => { st.adds[key] = e.target.value; } });
+        input.value = st.adds[key] || '';
+        tail = h('form', { class: 'al-addrow', onsubmit: (e) => {
+          e.preventDefault();
+          const text = cleanNote(st.adds[key] || '');
+          if (!text) return;
+          const r = write(addLine(st.doc.content, key, text));
+          if (r === 'ok') { st.adds[key] = ''; st.adding = null; st.notice = 'Written down.'; } else st.notice = STALE + 'Your words are still in the box. Press Add again.';
+          draw();
+        } }, input, h('button', { class: 'al-btn al-btn--primary', type: 'submit' }, 'Add'));
+        setTimeout(() => input.focus(), 0);
+      } else tail = h('button', { class: 'al-btn al-btn--quiet al-forgetall al-addbtn', type: 'button', onclick: () => { st.adding = key; draw(); } }, 'Add a line');
+      kids.push(h('section', { class: 'al-group', 'aria-label': copy.title }, h('h3', { class: 'al-eyebrow' }, copy.title), section ? lines(section) : h('p', { class: 'al-small' }, 'Nothing yet.'), tail));
+    });
+    sections.filter((s) => s.key === 'other' && s.lines.length).forEach((s) => kids.push(h('section', { class: 'al-group' }, h('h3', { class: 'al-eyebrow' }, s.heading), lines(s))));
+    const status = h('p', { role: 'status' });
+    const setStatus = () => (status.textContent = S.settings.carerSharing ? 'Someone you trust sees a short summary. Never your screen.' : 'Nobody else. Sharing is off.');
+    setStatus();
+    on((c) => c.includes('settings') && status.isConnected && setStatus());
+    kids.push(h('section', { class: 'al-group', 'aria-label': 'Who can see what' }, h('h3', { class: 'al-eyebrow' }, 'Who can see what'), status,
+      SwitchOn('Share my progress', '', () => S.settings.carerSharing, (v) => setSetting({ carerSharing: v }))));
+    const last = sections.find((s) => s.key === 'lastSession');
+    if (last && last.lines[0]) kids.push(h('section', { class: 'al-group', 'aria-label': 'Last session' }, h('h3', { class: 'al-eyebrow' }, 'Last time'), h('p', {}, last.lines[0].text)));
+    kids.push(h('button', { class: 'al-btn al-more', type: 'button', 'aria-expanded': String(st.more), onclick: () => { st.more = !st.more; draw(); } }, st.more ? 'Less' : 'More', icon('down')));
+    if (st.more) {
+      const editor = [];
+      if (st.editing) {
+        const ta = h('textarea', { class: 'al-textarea', id: 'al-profile-draft-' + profileViews.indexOf(api), 'aria-label': 'Your profile, as text', oninput: (e) => { st.draft = e.target.value; } });
+        ta.value = st.draft;
+        editor.push(ta);
+        if (st.latest !== null) {
+          editor.push(h('div', { class: 'al-conflict', role: 'alert' }, h('strong', {}, 'It changed while you were editing.'), h('span', {}, 'Your text is kept above. Here is the latest.'), h('pre', { class: 'al-latest' }, st.latest),
+            h('div', { class: 'al-actions' }, h('button', { class: 'al-btn', type: 'button', onclick: () => { st.draft = st.latest; st.latest = null; draw(); } }, 'Use the latest'),
+              h('button', { class: 'al-btn al-btn--primary', type: 'button', onclick: () => save() }, 'Save mine over it'))));
+        } else {
+          editor.push(h('div', { class: 'al-actions' }, h('button', { class: 'al-btn al-btn--primary', type: 'button', onclick: () => save() }, 'Save'),
+            h('button', { class: 'al-btn', type: 'button', onclick: () => { st.editing = false; st.latest = null; draw(); } }, 'Discard changes')));
+        }
+      } else {
+        editor.push(h('button', { class: 'al-btn', type: 'button', onclick: () => { st.draft = st.doc.content; st.latest = null; st.editing = true; draw(); } }, 'Edit the whole file'),
+          h('button', { class: 'pv-chipbtn', type: 'button', onclick: () => { fakeFile.stale = true; st.notice = 'Demo: the next save will act as if someone else changed the file.'; draw(); } }, 'Demo: make the next save fail'));
+      }
+      kids.push(h('div', { class: 'al-profile' },
+        h('section', { class: 'al-group', 'aria-label': 'Edit the whole file' }, h('h3', { class: 'al-eyebrow' }, 'The whole file'), ...editor),
+        h('section', { class: 'al-group al-danger', 'aria-label': 'Delete everything' }, h('h3', { class: 'al-eyebrow' }, 'Start again'),
+          h('button', { class: 'al-btn al-btn--danger', type: 'button', onclick: confirmDelete }, 'Delete everything I know about you'))));
+    }
+    const focused = root.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
+    root.replaceChildren(...kids);
+    if (focused) [...root.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === focused && e.matches('input, textarea'))?.focus();
+  }
+  function save() {
+    const r = write(st.draft);
+    if (r === 'ok') { st.editing = false; st.latest = null; st.notice = 'Saved.'; } else st.latest = st.doc.content;
+    draw();
+  }
+  const api = { el: root, sync: () => { if (!st.editing) { st.doc = { content: fakeFile.content, revision: fakeFile.revision }; draw(); } else if (st.doc.revision !== fakeFile.revision) { st.doc = { content: fakeFile.content, revision: fakeFile.revision }; } } };
+  profileViews.push(api);
+  draw();
+  return root;
 }
 
 /* ---------- progress ---------- */
@@ -854,14 +1056,73 @@ function ConfirmDemo() {
   return h('div', { class: 'pv-card' }, h('div', { class: 'pv-row' }, open), frame, result);
 }
 
-/* ---------- dock ---------- */
-function PhaseText() {
-  const el = h('span');
-  const u = () => (el.textContent = PHASES[S.phase].name);
-  u();
-  on(u);
-  return el;
+/* ---------- chat ---------- */
+const chat = {
+  messages: [
+    { id: 'u1', role: 'user', text: 'How do I make the writing bigger?', final: true },
+    { id: 'a1', role: 'assistant', text: 'Let’s do it together. Look for the gear icon in the top right.', final: true },
+  ],
+};
+const chatListeners = [];
+function pushChat(m) {
+  const i = chat.messages.findIndex((x) => x.id === m.id);
+  if (i < 0) chat.messages.push(m);
+  else chat.messages[i] = m;
+  chatListeners.forEach((f) => f());
 }
+let chatN = 0;
+function replyFor(text) {
+  if (/bigger|size|small|read/i.test(text)) return 'Open System Settings, then Displays. I will point to each one.';
+  if (/photo|picture/i.test(text)) return 'We can send it from Messages. Open Messages and tap the photo button.';
+  if (/scam|text from|bank/i.test(text)) return 'Show me the message and I will look for warning signs. I never call one safe.';
+  return 'Sure. Tell me what you can see on your screen and we will go one step at a time.';
+}
+function sendChat(text) {
+  const n = chatN++;
+  pushChat({ id: 't' + n, role: 'user', text, final: true });
+  const reply = replyFor(text);
+  setTimeout(() => pushChat({ id: 'e' + n, role: 'assistant', text: reply, final: false }), 450);
+  setTimeout(() => pushChat({ id: 'e' + n, role: 'assistant', text: reply, final: true }), 1400);
+}
+function ChatView() {
+  const uidn = ++uid;
+  const thread = h('div', { class: 'al-thread', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation' });
+  const top = h('div', { class: 'al-chat__top' }, Seg('How we talk', [['voice', 'Talk'], ['text', 'Type']], () => S.chatMode, (v) => set({ chatMode: v, settings: { ...S.settings, textOnly: v === 'text' } })), LevelChip({ variant: 'compact' }));
+  const pinned = h('div');
+  const input = h('input', { class: 'al-input', id: 'chat-input-' + uidn, type: 'text', autocomplete: 'off' });
+  const form = h('form', { class: 'al-composer', onsubmit: (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    send.disabled = true;
+    sendChat(text);
+  } }, h('label', { class: 'al-sr', for: 'chat-input-' + uidn }, 'Type a message'), input);
+  const send = h('button', { class: 'al-btn al-btn--primary', type: 'submit', disabled: true }, 'Send');
+  input.addEventListener('input', () => (send.disabled = input.value.trim() === ''));
+  form.append(send);
+  const root = h('div', { class: 'al-chat' }, top, pinned, thread, form);
+  const resting = () => S.phase === 'asleep' || S.phase === 'listening_for_name';
+  function draw() {
+    input.placeholder = S.chatMode === 'text' ? 'Type your question' : 'Or type here';
+    pinned.replaceChildren(...(S.phase === 'live' || S.phase === 'speaking' || S.phase === 'thinking' ? [Stepper(2, 4, 'Make the text bigger')] : []));
+    const kids = [];
+    if (S.phase === 'error') kids.push(h('div', { class: 'al-banner', role: 'alert' }, h('span', { class: 'al-banner__icon' }, icon('alert')), h('div', { class: 'al-banner__text' }, 'I lost the connection.'), h('button', { class: 'al-btn', type: 'button', onclick: () => set({ phase: 'connecting' }) }, 'Try again')));
+    if (chat.messages.length === 0) {
+      kids.push(h('div', { class: 'al-empty' }, S.chatMode === 'text' ? h('p', {}, 'Type a message to begin.') : resting()
+        ? [h('p', {}, 'Say ', h('strong', {}, `“Hey ${persona()}”`)), h('button', { class: 'al-btn al-btn--lg al-btn--primary', type: 'button', onclick: () => set({ phase: 'connecting' }) }, `Talk to ${persona()}`)]
+        : h('p', {}, 'I am listening.')));
+    } else chat.messages.forEach((m) => kids.push(h('div', { class: 'al-bubble', 'data-role': m.role, 'data-final': String(m.final) }, m.text)));
+    thread.replaceChildren(...kids);
+    thread.scrollTop = thread.scrollHeight;
+  }
+  chatListeners.push(draw);
+  on((c) => (c.includes('phase') || c.includes('chatMode') || c.includes('persona')) && draw());
+  draw();
+  return root;
+}
+
+/* ---------- dock ---------- */
 function Pill() {
   const wrap = h('span', { class: 'al-orbwrap' });
   const light = h('span', { class: 'al-orbwrap__light', 'aria-hidden': 'true' });
@@ -873,40 +1134,38 @@ function Pill() {
   on((c) => (c.includes('phase') || c.includes('persona') || c.includes('muted')) && drawOrb());
   const chip = LevelChip({ variant: 'compact' });
   const status = h('span', { class: 'al-sr', 'aria-live': 'polite' });
-  on(() => (status.textContent = `${persona()}. ${PHASES[S.phase].name}. ${lightText(lightState())}.`));
-  status.textContent = `${persona()}. ${PHASES[S.phase].name}. ${lightText(lightState())}.`;
+  const st = () => (status.textContent = `${persona()}. ${PHASES[S.phase].name}. ${lightText(lightState())}.`);
+  on(st);
+  st();
   const main = h('button', { class: 'al-pill__main', type: 'button', 'aria-label': 'Open the panel', title: lightText(lightState()), onclick: () => (expanded.hidden = !expanded.hidden) }, wrap, chip, status);
   return h('div', { class: 'al-dock', role: 'region', 'aria-label': 'Companion, collapsed' }, h('div', { class: 'al-pill' }, main, StopButton(true)));
 }
 let expanded;
 function Panel() {
   const orbHost = h('span', { style: 'display:contents' });
-  const drawOrb = () => orbHost.replaceChildren(Orb(S.phase, 56));
+  const drawOrb = () => orbHost.replaceChildren(Orb(S.phase, 48));
   drawOrb();
   const name = h('span', { class: 'al-pill__name' });
   const phase = h('span', { class: 'al-pill__phase' });
   const nameU = () => {
     name.textContent = persona();
-    phase.textContent = PHASES[S.phase].name;
+    phase.textContent = S.phase === 'error' ? PHASES.error.name : '';
+    phase.hidden = S.phase !== 'error';
   };
   nameU();
   const body = h('div', { class: 'al-dock__body', role: 'tabpanel', id: 'dock-panel' });
-  const tabs = ['now', 'progress', 'settings'].map((t) => h('button', { class: 'al-tab', role: 'tab', type: 'button', 'aria-selected': 'false', onclick: () => set({ tab: t }) }, { now: 'Now', progress: 'Progress', settings: 'Settings' }[t]));
+  const TABS = ['chat', 'progress', 'profile', 'settings'];
+  const tabs = TABS.map((t) => h('button', { class: 'al-tab', role: 'tab', type: 'button', 'aria-selected': 'false', onclick: () => set({ tab: t }) }, { chat: 'Chat', progress: 'Progress', profile: 'About you', settings: 'Settings' }[t]));
   const tabsEl = h('div', { class: 'al-tabs', role: 'tablist', 'aria-label': 'Companion sections' }, tabs);
+  const chatEl = ChatView();
   const settingsEl = SettingsPanel();
   const progressEl = ProgressView();
-  const nowEl = () => {
-    const kids = [];
-    if (S.phase === 'error') kids.push(h('div', { class: 'al-banner', role: 'alert' }, h('span', { class: 'al-banner__icon' }, icon('alert')), h('div', { class: 'al-banner__text' }, h('strong', {}, 'I lost the connection.'), 'Your lesson is saved. Check the internet and try again.'), h('button', { class: 'al-btn', type: 'button', onclick: () => set({ phase: 'connecting' }) }, 'Try again')));
-    if (S.phase === 'asleep' || S.phase === 'listening_for_name') kids.push(h('p', { class: 'al-wake-hint' }, 'Say ', h('strong', {}, `“Hey ${persona()}”`), ' and tell me what you’d like to do.'));
-    else kids.push(Stepper(2, 4, 'Make the text bigger'), h('p', { class: 'al-h3' }, 'Click the gear in the corner of your screen.'));
-    if (S.settings.captions && S.phase !== 'asleep') kids.push(h('div', { class: 'al-captions', 'aria-live': 'polite', 'aria-label': 'Captions' }, Caption('user', 'How do I make the writing bigger?'), Caption('assistant', 'Let’s do it together. Look for the gear icon.', S.phase !== 'speaking')));
-    kids.push(h('h3', { class: 'al-eyebrow' }, 'Helpers'), AgentTray());
-    return kids;
-  };
+  const profileEl = ProfileTab();
+  const views = { chat: chatEl, progress: progressEl, profile: profileEl, settings: settingsEl };
   const draw = () => {
-    tabs.forEach((b, i) => b.setAttribute('aria-selected', String(['now', 'progress', 'settings'][i] === S.tab)));
-    body.replaceChildren(...(S.tab === 'now' ? nowEl() : S.tab === 'progress' ? [progressEl] : [settingsEl]));
+    tabs.forEach((b, i) => b.setAttribute('aria-selected', String(TABS[i] === S.tab)));
+    body.classList.toggle('al-dock__body--chat', S.tab === 'chat');
+    body.replaceChildren(views[S.tab]);
   };
   draw();
   on((c) => {
@@ -914,14 +1173,13 @@ function Panel() {
       drawOrb();
       nameU();
     }
-    if (c.includes('tab') || c.includes('phase') || c.includes('persona') || c.includes('settings')) {
-      if (S.tab === 'now' || c.includes('tab') ) draw();
-    }
+    if (c.includes('tab')) draw();
   });
-  const chip = LevelChip();
+  const aa = h('button', { class: 'al-btn al-btn--quiet al-aa', type: 'button', 'aria-label': 'Easier-to-read font', title: 'Easier-to-read font', 'aria-pressed': 'false', onclick: () => set({ dys: !S.dys }) }, 'Aa');
+  on(() => aa.setAttribute('aria-pressed', String(S.dys)));
   const collapse = h('button', { class: 'al-btn al-btn--quiet', type: 'button', 'aria-label': 'Collapse the panel', onclick: () => (expanded.hidden = true) }, icon('up'));
-  return h('div', { class: 'al-dock al-dock--panel', role: 'region', 'aria-label': 'Companion panel' },
-    h('div', { class: 'al-dock__head' }, h('div', { class: 'al-dock__headrow' }, orbHost, h('div', { class: 'al-pill__who', style: 'flex:1;min-width:0' }, name, phase), MuteButton(), collapse), h('div', {}, chip)),
+  return h('div', { class: 'al-dock al-dock--panel', role: 'region', 'aria-label': 'Companion panel', 'data-modal-host': '' },
+    h('div', { class: 'al-dock__head' }, h('div', { class: 'al-dock__headrow' }, orbHost, h('div', { class: 'al-pill__who', style: 'flex:1;min-width:0' }, name, phase), aa, MuteButton(), collapse)),
     tabsEl, body, h('div', { class: 'al-dock__foot' }, ListeningLight(), StopButton(false)));
 }
 
@@ -967,7 +1225,7 @@ function HeroSection() {
 function ControlBar() {
   const theme = h('div', { class: 'al-seg', role: 'radiogroup', 'aria-label': 'Theme' });
   const opts = [['light', 'Light'], ['dark', 'Dark'], ['hc', 'Contrast']];
-  const btns = opts.map(([v, t]) => h('button', { class: 'al-seg__btn', type: 'button', role: 'radio', 'aria-label': v === 'hc' ? 'High contrast' : t, onclick: () => (v === 'hc' ? set({ hc: true }) : set({ hc: false, theme: v })) }, t));
+  const btns = opts.map(([v, t]) => h('button', { class: 'al-seg__btn', type: 'button', role: 'radio', 'aria-label': v === 'hc' ? 'High contrast' : t, onclick: () => (v === 'hc' ? set({ hc: true }) : set({ hc: false, themeSetting: v })) }, t));
   btns.forEach((b) => theme.append(b));
   const hcRow = h('div', { class: 'pv-opts__row' }, h('span', { class: 'al-small' }, 'High contrast on'), h('button', { class: 'pv-chipbtn', type: 'button', onclick: () => set({ hcDark: false }) }, 'White'), h('button', { class: 'pv-chipbtn', type: 'button', onclick: () => set({ hcDark: true }) }, 'Black'));
   const u = () => {
@@ -987,7 +1245,7 @@ function ControlBar() {
   const personaSeg = Seg('Companion', Object.entries(PERSONAS).map(([id, p]) => [id, p.displayName]), () => S.persona, (v) => set({ persona: v }));
   const optsEl = h('div', { class: 'pv-opts', id: 'pv-opts' }, h('div', { class: 'pv-opts__grid' },
     h('div', {}, hcRow, h('div', { class: 'pv-opts__row' }, personaSeg)),
-    h('div', {}, toggle('Big marks on screen', 'big'), toggle('Easier-to-read font', 'dys'), toggle('Reduce motion', 'reduce'))));
+    h('div', {}, toggle('Glass look', 'glass'), toggle('Easier-to-read font', 'dys'), toggle('Big marks on screen', 'big'), toggle('Reduce motion', 'reduce'))));
   const more = h('button', { class: 'al-btn pv-bar__more', type: 'button', 'aria-expanded': 'false', 'aria-controls': 'pv-opts', onclick: (e) => {
     const open = optsEl.dataset.open !== 'true';
     optsEl.dataset.open = String(open);
@@ -1016,7 +1274,7 @@ function build() {
         h('div', { class: 'pv-mark' }, Orb('live', 36), 'Alongside'),
         h('h1', {}, 'A patient companion, on your screen.'),
         h('p', {}, 'Everything here is the real interface: the small dock, the level chip, the marks drawn on your screen, and the controls. Tap things. Try the theme and options bar above.')),
-      Section('The dock', 'Always there, never in the way', 'A small pill that expands into a panel. Stop is always one tap away. Pick a state to see the orb and the listening light respond.',
+      Section('The dock', 'Always there, never in the way', 'A small pill that expands into a panel with four tabs. Type in the chat, or talk. Try Glass look in Options, and Aa for an easier-to-read font.',
         h('div', { class: 'pv-row' }, phaseBtns),
         h('div', { class: 'pv-row' }, h('span', { class: 'al-small' }, 'Help level'), levelBtns),
         h('div', { class: 'pv-desktop' }, pill, expanded)),
@@ -1028,6 +1286,7 @@ function build() {
           h('div', { class: 'pv-card' }, h('h3', { class: 'al-h3' }, 'Captions'), h('div', { class: 'al-captions' }, Caption('user', 'Is this text from my bank?'), Caption('assistant', 'I can check it for warning signs. One moment.'), Caption('assistant', 'I see a deadline and a link', false), Caption('system', 'Captions are on. You can turn them off in Settings.'))),
           h('div', { class: 'pv-card' }, h('h3', { class: 'al-h3' }, 'Helpers'), AgentTray(), h('button', { class: 'al-btn', type: 'button', onclick: startAgent }, 'Start a check')))),
       Section('A real click', 'Asking before it acts', 'Only a click or tap can answer. Nothing a message says, and nothing the model says, can approve an action.', ConfirmDemo()),
+      Section('Your profile', 'A file you own', 'One readable file, kept on this computer. Change it, forget any line, or delete it all.', h('div', { class: 'pv-card pv-profilehost', 'data-modal-host': '' }, ProfileTab())),
       Section('Progress', 'Proof you need me less', 'Plain lists and charts you can read at a glance. The hints chart is the point: it should fall.', h('div', { class: 'pv-card' }, ProgressView())),
       h('footer', { class: 'pv-foot' }, 'Alongside design preview. Names are placeholders and set in one constant. All progress figures are example data. Drawn marks are scaled up for the preview.'),
     ),
@@ -1037,5 +1296,5 @@ function build() {
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => 0);
 const sysDark = matchMedia('(prefers-color-scheme: dark)').matches;
 const explicit = document.documentElement.getAttribute('data-theme');
-S.theme = explicit === 'dark' || (explicit !== 'light' && sysDark) ? 'dark' : 'light';
+S.themeSetting = explicit === 'dark' || (explicit !== 'light' && sysDark) ? 'dark' : 'light';
 build();

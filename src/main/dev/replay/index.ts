@@ -7,6 +7,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { readRequestBody } from '../fetch-probe'
 
 export type ReplayMode = 'off' | 'record' | 'replay' | 'hybrid'
 
@@ -117,7 +118,7 @@ export function createReplayFetch(opts: ReplayOptions): { fetch: typeof fetch; s
       return realFetch(input, init)
     }
     const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase()
-    const body = typeof init?.body === 'string' ? init.body : undefined
+    const body = await readRequestBody(input, init)
     if (!GOOGLE_HOST.test(url.hostname) || method !== 'POST' || SKIP_PATH.test(url.pathname)) {
       if (opts.mode === 'replay' && GOOGLE_HOST.test(url.hostname)) throw new TypeError('fetch failed') // offline: nothing else may leave
       return realFetch(input, init)

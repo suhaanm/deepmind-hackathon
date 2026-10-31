@@ -33,6 +33,20 @@ export interface FetchProbe {
 
 const GOOGLE_HOST = /(^|\.)googleapis\.com$/
 
+// The Google SDK passes a Request object (body inside), not (url, init.body); read either form without consuming it.
+export async function readRequestBody(input: Request | URL | string, init?: RequestInit): Promise<string | undefined> {
+  if (typeof init?.body === 'string') return init.body
+  if (init?.body instanceof Uint8Array) return Buffer.from(init.body).toString('utf8')
+  if (input instanceof Request && input.body !== null) {
+    try {
+      return await input.clone().text()
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
 function describeBody(body: unknown): { keys: string[]; store: boolean | null; hasImage: boolean; bytes: number; model: string | null } {
   if (typeof body !== 'string') return { keys: [], store: null, hasImage: false, bytes: 0, model: null }
   const bytes = Buffer.byteLength(body)
@@ -63,7 +77,7 @@ export function installFetchProbe(): FetchProbe {
 
     const started = Date.now()
     const method = init?.method ?? (input instanceof Request ? input.method : 'GET')
-    const info = describeBody(init?.body)
+    const info = describeBody(await readRequestBody(input, init))
     // Generate-content puts the model in the path; the Interactions API puts it in the body.
     const model = /models\/([^/:?]+)/.exec(url.pathname)?.[1] ?? info.model
     const entry: FetchLogEntry = {

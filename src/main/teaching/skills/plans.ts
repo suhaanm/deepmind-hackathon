@@ -3,7 +3,7 @@
 // descriptions, expected outcomes and step order follow apps/demo-stage/flows.js (window.STAGE_FLOWS) and
 // each step's `groundId` is the stage's data-ground-id for it (handy for QA and the grounding benchmark).
 import { truncateWords } from '../../../shared/protocol'
-import type { LessonPlan, LessonStep, SkillId } from '../../../shared/protocol'
+import type { BuiltinSkillId, LessonPlan, LessonStep } from '../../../shared/protocol'
 import { SKILLS } from './definitions'
 
 interface StaticStep extends Omit<LessonStep, 'index'> {
@@ -208,11 +208,11 @@ const BIGGER_TEXT: StaticStep[] = [
   },
 ]
 
-const STEPS: Record<SkillId, StaticStep[]> = { video_call: VIDEO_CALL, spot_scam: SPOT_SCAM, bigger_text: BIGGER_TEXT }
+const STEPS: Record<BuiltinSkillId, StaticStep[]> = { video_call: VIDEO_CALL, spot_scam: SPOT_SCAM, bigger_text: BIGGER_TEXT }
 
 let seq = 0
 
-export function fallbackPlan(skillId: SkillId, goal?: string): LessonPlan {
+export function fallbackPlan(skillId: BuiltinSkillId, goal?: string): LessonPlan {
   const steps: LessonStep[] = STEPS[skillId].map(({ groundId: _groundId, ...step }, index) => ({
     ...step,
     index,
@@ -230,3 +230,29 @@ export function fallbackPlan(skillId: SkillId, goal?: string): LessonPlan {
 export const FALLBACK_GROUND_IDS: Record<string, string> = Object.fromEntries(
   Object.values(STEPS).flatMap((steps) => steps.map((s) => [s.id, s.groundId] as const)),
 )
+
+// When Argon cannot plan a novel goal in time: one honest step that just points at what was asked about.
+// Never a built-in lesson that does not match the goal.
+export function pointerPlan(goal: string): LessonPlan {
+  const what = goal.trim().replace(/\s+/g, ' ').slice(0, 120) || 'what you asked about'
+  return {
+    lessonId: `pointer-${++seq}`,
+    skillId: 'custom',
+    goal: what,
+    steps: [
+      {
+        id: 'custom.point',
+        index: 0,
+        instruction: truncateWords(`Here is where to look for: ${what}`),
+        targetDescription: what,
+        expectedOutcome: `The learner has done what they asked: ${what}`,
+        hints: {
+          l1: 'I will point to the part of the screen to look at. You do the clicking.',
+          l2: 'Look where the arrow points.',
+          l3: 'Look at the highlighted part of the screen.',
+        },
+        safetyCritical: false,
+      },
+    ],
+  }
+}

@@ -38,3 +38,14 @@ export class ConfirmBroker {
     pending.resolve(choice)
   }
 }
+
+// LIVE: once a lesson step is verified done (screen, step_done or verify_step), a still-open approval is moot: the learner
+// already did it. It is dismissed as a decline (null), never as an approval, so nothing is performed.
+export function dismissConfirmOnStepVerified(
+  bus: { on(event: 'lesson:step', listener: (e: { phase: string }) => void): () => void },
+  confirm: Pick<ConfirmBroker, 'cancel'>,
+): () => void {
+  return bus.on('lesson:step', (e) => {
+    if (e.phase === 'verified') confirm.cancel()
+  })
+}

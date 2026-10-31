@@ -28,6 +28,13 @@ describe('buildProgress', () => {
     expect(p.confidence).toEqual({ points: [], first: null, latest: null })
   })
 
+  it('reports how often the assistant did things for the learner, only when it did', () => {
+    expect(buildProgress(snap(), { now: NOW }).doneForMe).toBeUndefined()
+    const p = buildProgress(snap({ doneForMe: { 'open:www.ageuk.org.uk': 2, 'task:find the opening times': 1 } }), { now: NOW })
+    expect(p.doneForMe).toEqual({ total: 3, text: 'Done for you: 3 times. Ask to be shown and you will need this less.' })
+    expect(buildProgress(snap({ doneForMe: { x: 1 } }), { now: NOW }).doneForMe?.text).toMatch(/^Done for you: 1 time\./)
+  })
+
   it('one attempt asks for one more before comparing', () => {
     const p = buildProgress(snap({ attempts: [att({ hintsUsed: 3 })] }), { now: NOW })
     expect(p.overall.headline).toBe('Your first practice needed 3 hints. Do one more and we can compare.')
@@ -82,6 +89,22 @@ describe('buildProgress', () => {
     ])
     expect(p.skills.find((s) => s.skillId === 'bigger_text')?.mastered).toBe(true)
     expect(p.skills.find((s) => s.skillId === 'spot_scam')?.mode).toBe('with_help')
+  })
+
+  it('the generic custom skill appears only once used, and is never the suggested next lesson', () => {
+    expect(buildProgress(snap(), { now: NOW }).skills.map((s) => s.skillId)).toEqual(['video_call', 'spot_scam', 'bigger_text'])
+    const p = buildProgress(
+      snap({
+        skills: { video_call: fresh, spot_scam: fresh, bigger_text: fresh, custom: { level: 1, streakClean: 0, lastSeen: NOW, nextReview: NOW - 5 } },
+        attempts: [att({ id: 'c1', skillId: 'custom', hintsUsed: 1 })],
+      }),
+      { now: NOW },
+    )
+    expect(p.skills.map((s) => s.skillId)).toEqual(['video_call', 'spot_scam', 'bigger_text', 'custom'])
+    expect(p.skills[3]).toMatchObject({ name: 'Something new', reviewDue: true })
+    expect(p.canDoNow.map((c) => c.skillId)).toEqual(['custom'])
+    expect(p.hintsPerTask.map((s) => s.skillId)).toEqual(['custom'])
+    expect(p.nextSuggested?.skillId).not.toBe('custom')
   })
 
   it('confidence trend is ordered; the most overdue review is suggested first', () => {

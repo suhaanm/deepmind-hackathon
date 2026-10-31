@@ -9,6 +9,7 @@ import { LessonPlanSchema, truncateWords } from '../../shared/protocol'
 import type {
   Annotation,
   AttemptRecord,
+  BuiltinSkillId,
   GroundResult,
   HelpLevel,
   LearnerSnapshot,
@@ -28,6 +29,8 @@ import type { Capture, Grounder, LearnerStore, LessonArchitect, LessonRunner, Le
 import type { Settings } from '../../shared/settings'
 import {
   lessonCompleteDirective,
+  planningDirective,
+  pointerFallbackDirective,
   levelDirective,
   oneLine,
   repairDirective,
@@ -48,7 +51,7 @@ import {
   startAttemptLevel,
 } from './levels'
 import type { AttemptLevelState, AttemptSignal, EvaluateOptions, OverrideKind } from './levels'
-import { fallbackPlan } from './skills/plans'
+import { fallbackPlan, pointerPlan } from './skills/plans'
 import { SKILLS, pickSkill } from './skills/definitions'
 
 export interface Clock {
@@ -71,6 +74,8 @@ export interface RunnerConfig {
   rungGapFactor: number
   verifyDebounceMs: number
   minVerifyGapMs: number
+  // An explicit step_done / verify_step within this window of an advance acknowledges that advance (no double step).
+  ackWindowMs: number
   maxVerifyGapMs: number
   // How long to wait for the model's end_lesson before closing the attempt ourselves.
   endTimeoutMs: number
@@ -80,16 +85,18 @@ export interface RunnerConfig {
 }
 
 export const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
-  planTimeoutMs: 8_000,
+  // Only novel goals wait for the architect (built-in skills start instantly from their static plans).
+  planTimeoutMs: 15_000,
   stallMs: { 1: 15_000, 2: 12_000, 3: 8_000, 4: 20_000 },
   rungGapFactor: 0.75,
   verifyDebounceMs: 700,
   minVerifyGapMs: 1_500,
+  ackWindowMs: 3_000,
   maxVerifyGapMs: 10_000,
   endTimeoutMs: 90_000,
   tickMs: 1_500,
   minVerifyConfidence: 0.6,
-  grabShotForPlanMs: 800,
+  grabShotForPlanMs: 3_000,
 }
 
 export interface AttemptSink {
@@ -99,7 +106,8 @@ export interface AttemptSink {
 
 export interface RunnerDeps {
   capture: Capture
-  // prefetch/invalidate are optional on the contract; the runner works with or without them.
+  // prefetch/invalidate are optional on the contract; the runner works with or without them. Every lesson step is
+  // grounded with precise:true (one wrong ring is a visible failure; the prefetch hides the extra latency).
   grounder: Grounder
   verifier: Verifier
   architect: LessonArchitect
@@ -119,13 +127,7 @@ export interface RunnerDeps {
   log?: (...args: unknown[]) => void
 }
 
-export class UnsupportedGoalError extends Error {
-  constructor() {
-    super('I can only teach three things so far: starting a video call, spotting a scam message and making text bigger.')
-  }
-}
-
-const ANNOTATION_IDS = ['runner-ring', 'runner-arrow', 'runner-badge', 'runner-ghost', 'runner-glow', 'runner-tick']
+const ANNOTATION_IDS = ['runner-ring', 'runner-arrow', 'runner-ghost', 'runner-glow', 'runner-tick']
 const MAX_RUNGS: Record<HelpLevel, number> = { 1: 2, 2: 2, 3: 3, 4: 1 }
 
 interface Active {
@@ -133,7 +135,7 @@ interface Active {
   plan: LessonPlan
   skillId: SkillId
   goal: string
-  planSource: 'architect' | 'fallback'
+  planSource: 'builtin' | 'architect' | 'pointer'
   index: number
   stepsVerified: number
   baseState: SkillState
@@ -149,6 +151,9 @@ interface Active {
   lastVerifyAt: number
   // Screen-triggered checks that found nothing yet on this step: each one doubles the wait for the next.
   notYet: number
+  // When the last step was verified and what the verdict was: step_done/verify_step right after it is the same completion.
+  advancedAt: number
+  lastVerdict: Verdict | null
   verifying: Promise<VerifyOutcome> | null
   finished: boolean
   ended: boolean
@@ -171,6 +176,7 @@ const CONFIDENCE_RE = /\bconfidence\D{0,15}([1-5])\b/i
 export class LessonRunnerImpl implements LessonRunner {
   private active: Active | null = null
   private tokenSeq = 0
+  private startSeq = 0
   private idSeq = 0
   private settled: Promise<unknown> = Promise.resolve()
   private readonly clock: Clock
@@ -206,11 +212,18 @@ export class LessonRunnerImpl implements LessonRunner {
 
   // ---------------------------------------------------------------- start
   async start(goal: string): Promise<{ lessonId: string; skillId: SkillId; stepCount: number }> {
+    // A session that ends (goodbye, Stop) while a plan is still being worked out must not start a lesson afterwards.
+    const ticket = ++this.startSeq
+    const cancelled = (): never => {
+      throw new Error('The lesson was cancelled before it started.')
+    }
     const ready = this.deps.ready
     if (ready) await ready
+    if (ticket !== this.startSeq) cancelled()
     if (this.active) await this.teardown('replaced', false)
     const matched = pickSkill(goal)
     const { plan, source } = await this.obtainPlan(goal, matched)
+    if (ticket !== this.startSeq) cancelled()
     const skillId = plan.skillId
     const now = this.clock.now()
     const settings = this.deps.getSettings()
@@ -220,6 +233,10 @@ export class LessonRunnerImpl implements LessonRunner {
     const stored = (this.deps.learner as { storedSkill?: (id: SkillId) => SkillState | undefined }).storedSkill?.(skillId) ?? base
     const locked = settings.helpLevelMode === 'locked'
     const level = locked ? settings.lockedLevel : base.level
+    // A lesson with a safety-critical step is always tracked step by step (never the untracked whole-task mode of L4),
+    // so that step can be lifted to Walk-with-me when it arrives.
+    const cap = this.levelCap(plan)
+    const effective = clampLevel(Math.min(level, cap))
     const a: Active = {
       lessonId: plan.lessonId,
       plan,
@@ -231,15 +248,17 @@ export class LessonRunnerImpl implements LessonRunner {
       baseState: base,
       persistentLevel: level,
       chipLevel: this.deps.state.get().level,
-      attempt: startAttemptLevel(level),
+      attempt: startAttemptLevel(effective),
       startedAt: now,
       safetyFlag: false,
       rung: 0,
-      stepLevel: level,
+      stepLevel: effective,
       ground: null,
       box: null,
       lastVerifyAt: 0,
       notYet: 0,
+      advancedAt: -Infinity,
+      lastVerdict: null,
       verifying: null,
       finished: false,
       ended: false,
@@ -251,25 +270,28 @@ export class LessonRunnerImpl implements LessonRunner {
       token: ++this.tokenSeq,
     }
     this.active = a
-    this.setChip(a, level, base.level !== stored.level ? 'quick refresher after time away' : 'level for this skill', 'skill')
-    this.deps.state.patch({ skill: { id: skillId, name: SKILLS[skillId].name, step: 1, stepCount: plan.steps.length } })
+    // Overlap step 1's grounding with the assistant's opening line: start it now, not on the next tick.
+    if (source !== 'architect') void this.deps.grounder.prefetch?.({ target: plan.steps[0].targetDescription, precise: true })
+    this.setChip(a, effective, base.level !== stored.level ? 'quick refresher after time away' : effective < level ? 'this lesson keeps a safety net' : 'level for this skill', 'skill')
+    this.deps.state.patch({ skill: { id: skillId, name: this.lessonName({ skillId, goal }), step: 1, stepCount: plan.steps.length } })
     a.unwatch = this.deps.capture.watch((score) => this.onScreenChange(a, score))
     // The tool result goes back first; step 1 is announced on the next tick so the model gets the answer before the direction.
     this.track(
       new Promise<void>((resolve) => {
         this.clock.setTimeout(() => {
-          void this.beginStep(a, 0, true).finally(resolve)
+          void this.beginStep(a, 0, true, source === 'pointer' ? `${pointerFallbackDirective()} ` : '').finally(resolve)
         }, 0)
       }),
     )
     return { lessonId: plan.lessonId, skillId, stepCount: plan.steps.length }
   }
 
-  private async obtainPlan(goal: string, matched: SkillId | null): Promise<{ plan: LessonPlan; source: 'architect' | 'fallback' }> {
-    const fall = (): { plan: LessonPlan; source: 'fallback' } => {
-      if (!matched) throw new UnsupportedGoalError()
-      return { plan: (this.deps.planFor ?? fallbackPlan)(matched, goal), source: 'fallback' }
-    }
+  // Built-in skills start at once from their static plans (fast, deterministic, matched to the stage). Anything else
+  // is planned by the architect from the live screen; if that fails we say so and just point, never a wrong lesson.
+  private async obtainPlan(goal: string, matched: BuiltinSkillId | null): Promise<{ plan: LessonPlan; source: 'builtin' | 'architect' | 'pointer' }> {
+    if (matched) return { plan: (this.deps.planFor ?? fallbackPlan)(matched, goal), source: 'builtin' }
+    // Keep the assistant talking while the plan is worked out.
+    this.deps.live.inject(planningDirective(goal))
     try {
       // One hard deadline for the whole plan request, shot included.
       const deadline = this.clock.now() + this.cfg.planTimeoutMs
@@ -280,13 +302,23 @@ export class LessonRunnerImpl implements LessonRunner {
       if (!parsed.success) throw new Error('plan failed validation')
       const plan: LessonPlan = {
         ...parsed.data,
-        steps: parsed.data.steps.map((s, i) => ({ ...s, index: i, instruction: truncateWords(s.instruction) })),
+        skillId: 'custom',
+        goal: oneLine(goal).slice(0, 120) || parsed.data.goal,
+        steps: parsed.data.steps.map((st, i) => ({ ...st, index: i, instruction: truncateWords(st.instruction) })),
       }
       return { plan, source: 'architect' }
     } catch (err) {
-      this.log('plan unavailable, using the built-in lesson:', err instanceof Error ? err.message : err)
-      return fall()
+      this.log('could not plan a new lesson, pointing instead:', err instanceof Error ? err.message : err)
+      return { plan: pointerPlan(goal), source: 'pointer' }
     }
+  }
+
+  private levelCap(plan: LessonPlan): HelpLevel {
+    return plan.steps.some((st) => st.safetyCritical) ? 3 : 4
+  }
+
+  private lessonName(a: Pick<Active, 'skillId' | 'goal'>): string {
+    return a.skillId === 'custom' ? oneLine(a.goal).slice(0, 80) : SKILLS[a.skillId].name
   }
 
   private race<T>(p: Promise<T>, ms: number): Promise<T | undefined> {
@@ -326,14 +358,16 @@ export class LessonRunnerImpl implements LessonRunner {
     this.clearTimer(a, 'stallTimer')
     this.clearTimer(a, 'verifyTimer')
     this.deps.overlay.clear(ANNOTATION_IDS)
-    this.deps.state.patch({ skill: { id: a.skillId, name: SKILLS[a.skillId].name, step: index + 1, stepCount: a.plan.steps.length } })
+    this.deps.state.patch({ skill: { id: a.skillId, name: this.lessonName(a), step: index + 1, stepCount: a.plan.steps.length } })
     this.deps.bus.emit('lesson:step', { lessonId: a.lessonId, skillId: a.skillId, stepIndex: index, stepCount: a.plan.steps.length, phase: 'started', step })
     if (a.stepLevel !== a.chipLevel && !this.isLocked()) this.setChip(a, a.stepLevel, a.stepLevel < a.chipLevel ? 'this step is safety-critical' : 'back to your level', 'step')
 
     // 1. Narration first. Grounding (seconds) overlaps it; the model is never blocked on the screen.
     const needsPicture = a.stepLevel <= 3
-    if (needsPicture) void this.deps.grounder.prefetch?.({ target: step.targetDescription, precise: step.safetyCritical })
-    this.deps.live.inject(
+    if (needsPicture && !(first && a.planSource === 'architect')) void this.deps.grounder.prefetch?.({ target: step.targetDescription, precise: true })
+    // Nothing to say for a quiet L4 step: skip the direction unless there is a lead (level change, acknowledgement).
+    const quietStep = a.stepLevel >= 4 && !first && !step.safetyCritical && lead.trim() === ''
+    if (!quietStep) this.deps.live.inject(
       lead +
         stepDirective({
           stepNumber: index + 1,
@@ -344,7 +378,7 @@ export class LessonRunnerImpl implements LessonRunner {
           analogy: first || a.stepLevel === 1 ? step.analogy : undefined,
           safetyCritical: step.safetyCritical,
           pauseForCheck: a.stepLevel === 1 && ((index + 1) % 3 === 0 || index === a.plan.steps.length - 1),
-          lessonStart: first ? { name: SKILLS[a.skillId].name, goal: a.goal } : undefined,
+          lessonStart: first ? { name: this.lessonName(a), goal: a.goal } : undefined,
           annotated: needsPicture,
         }),
     )
@@ -363,13 +397,18 @@ export class LessonRunnerImpl implements LessonRunner {
     this.armStall(a)
   }
 
+  // Step 1 of an architect plan was already grounded (and prefetched) from the screenshot it was planned on: reuse it.
+  private preciseFor(a: Active): boolean {
+    return !(a.planSource === 'architect' && a.index === 0 && a.stepsVerified === 0)
+  }
+
   private async groundStep(a: Active, step: LessonStep): Promise<GroundResult | null> {
     try {
       // With prefetch the grounder owns its screenshot (warm cache); otherwise we hand it one.
       const prefetching = typeof this.deps.grounder.prefetch === 'function'
       const shot = prefetching ? undefined : await this.deps.capture.grab('ground')
       if (!this.current(a)) return null
-      const res = await this.deps.grounder.ground({ target: step.targetDescription, shot, precise: step.safetyCritical })
+      const res = await this.deps.grounder.ground({ target: step.targetDescription, shot, precise: this.preciseFor(a) })
       return res.found && res.box ? res : null
     } catch (err) {
       this.log('grounding failed:', err instanceof Error ? err.message : err)
@@ -386,10 +425,8 @@ export class LessonRunnerImpl implements LessonRunner {
     const box = a.box
     if (!box || level >= 3) return
     const n = a.index + 1
-    const annotations: Annotation[] = [
-      { id: 'runner-ring', kind: 'ring', tone: 'guide', box, label: truncateWords(step.instruction, 6), step: n },
-      { id: 'runner-badge', kind: 'badge', tone: 'guide', at: { x: box.xmin, y: box.ymin }, n },
-    ]
+    // The overlay draws the numbered badge from ring.step; no separate badge annotation.
+    const annotations: Annotation[] = [{ id: 'runner-ring', kind: 'ring', tone: 'guide', box, label: truncateWords(step.instruction, 6), step: n }]
     if (level === 2) annotations.push({ id: 'runner-arrow', kind: 'arrow', tone: 'guide', to: box })
     if (level === 1) annotations.push(this.ghost(box))
     this.deps.overlay.show(annotations)
@@ -518,7 +555,7 @@ export class LessonRunnerImpl implements LessonRunner {
     } else if (target > from) {
       const asked = detectOverride(why) === 'let_me_try' || /\b(?:on my own|by myself|try (?:it )?(?:alone|myself))\b/i.test(why)
       if (!asked) return { applied: false, level: shown, note: 'The level goes up when you have shown you are ready. Keep going.' }
-      a.attempt = { ...applyOverride(a.attempt, 'let_me_try'), current: target }
+      a.attempt = { ...applyOverride(a.attempt, 'let_me_try'), current: clampLevel(Math.min(target, this.levelCap(a.plan))) }
     } else {
       return { applied: false, level: shown, note: 'Already at that level.' }
     }
@@ -544,6 +581,7 @@ export class LessonRunnerImpl implements LessonRunner {
     const override = detectOverride(text)
     if (override && !this.isLocked()) {
       a.attempt = applyOverride(a.attempt, override)
+      a.attempt = { ...a.attempt, current: clampLevel(Math.min(a.attempt.current, this.levelCap(a.plan))) }
       this.setChip(a, a.attempt.current, override === 'show_again' ? 'asked to see it again' : 'asked to try alone', 'manual')
       this.deps.live.inject(levelDirective(a.attempt.current, override === 'show_again' ? 'asked to see it again' : 'asked to try alone'))
       const step = a.plan.steps[a.index]
@@ -560,9 +598,7 @@ export class LessonRunnerImpl implements LessonRunner {
     // Overlap: warm the next target while the verifier is still thinking.
     const next = a.plan.steps[a.index + 1]
     this.deps.grounder.invalidate?.()
-    if (next) void this.deps.grounder.prefetch?.({ target: next.targetDescription, precise: next.safetyCritical })
-    // At L4 the learner is on their own: no checking until they ask.
-    if (a.stepLevel >= 4) return
+    if (next) void this.deps.grounder.prefetch?.({ target: next.targetDescription, precise: true })
     this.clearTimer(a, 'verifyTimer')
     // The dock's own captions also change the screen: back off when checks keep finding nothing.
     const gap = Math.min(this.cfg.maxVerifyGapMs, this.cfg.minVerifyGapMs * 2 ** a.notYet)
@@ -570,7 +606,9 @@ export class LessonRunnerImpl implements LessonRunner {
     const token = a.token
     a.verifyTimer = this.clock.setTimeout(() => {
       if (!this.active || this.active.token !== token) return
-      void this.verifyAndAdvance(a, 'screen')
+      // At L4 the learner is on their own: steps are not tracked, only a silent check for the finished task.
+      if (a.stepLevel >= 4) void this.endStateCheck(a)
+      else void this.verifyAndAdvance(a, 'screen')
     }, wait)
   }
 
@@ -586,6 +624,10 @@ export class LessonRunnerImpl implements LessonRunner {
     if (a.stepLevel >= 4) {
       const v = await this.verifyWholeTask(a)
       return { ok: this.accepts(v), done: a.finished }
+    }
+    // Called right after the app itself verified and advanced (a model that calls both tools): same completion.
+    if (this.clock.now() - a.advancedAt < this.cfg.ackWindowMs && a.index > 0) {
+      return { ok: true, done: false, step: { index: a.index, instruction: a.plan.steps[a.index].instruction } }
     }
     const idx = a.index
     const outcome = await this.verifyAndAdvance(a, 'step_done')
@@ -603,6 +645,7 @@ export class LessonRunnerImpl implements LessonRunner {
       return this.deps.verifier.verify({ expected: expectedOutcome ?? 'the task is complete', shot })
     }
     if (a.stepLevel >= 4) return this.verifyWholeTask(a)
+    if (a.lastVerdict && this.clock.now() - a.advancedAt < this.cfg.ackWindowMs && a.index > 0) return a.lastVerdict
     const outcome = await this.verifyAndAdvance(a, 'tool')
     return outcome.verdict
   }
@@ -620,6 +663,33 @@ export class LessonRunnerImpl implements LessonRunner {
       this.signal(a, 'hint')
     }
     return verdict
+  }
+
+  private async endStateCheck(a: Active): Promise<void> {
+    if (a.verifying || !this.current(a) || a.finished) return
+    const last = a.plan.steps[a.plan.steps.length - 1]
+    a.lastVerifyAt = this.clock.now()
+    const run = (async (): Promise<VerifyOutcome> => {
+      let verdict: Verdict
+      try {
+        const shot = await this.deps.capture.grab('verify')
+        verdict = await this.deps.verifier.verify({ step: last, shot })
+      } catch {
+        verdict = { completed: false, confidence: 0, evidence: 'The check could not run.', uncertain: true }
+      }
+      if (!this.current(a) || a.finished) return { verdict, advanced: false, stale: true }
+      if (this.accepts(verdict)) {
+        a.stepsVerified = a.plan.steps.length
+        await this.completeLesson(a, true)
+        return { verdict, advanced: true, stale: false }
+      }
+      a.notYet++
+      return { verdict, advanced: false, stale: false }
+    })().finally(() => {
+      if (a.verifying === run) a.verifying = null
+    })
+    a.verifying = run
+    await run
   }
 
   private accepts(v: Verdict): boolean {
@@ -650,7 +720,8 @@ export class LessonRunnerImpl implements LessonRunner {
     if (!this.current(a) || a.index !== index || a.finished) return { verdict, advanced: false, stale: true }
 
     if (this.accepts(verdict)) {
-      await this.onStepVerified(a, step, index)
+      a.lastVerdict = verdict
+      await this.onStepVerified(a, step, index, source)
       return { verdict, advanced: true, stale: false }
     }
     if (verdict.uncertain || verdict.confidence < this.cfg.minVerifyConfidence) {
@@ -689,26 +760,29 @@ export class LessonRunnerImpl implements LessonRunner {
     this.armStall(a)
   }
 
-  private async onStepVerified(a: Active, step: LessonStep, index: number): Promise<void> {
+  private async onStepVerified(a: Active, step: LessonStep, index: number, source: 'screen' | 'step_done' | 'tool'): Promise<void> {
     this.clearTimer(a, 'stallTimer')
     this.clearTimer(a, 'verifyTimer')
     a.stepsVerified++
+    // Only a screen-triggered advance can be "double reported" by a model that also calls step_done / verify_step.
+    a.advancedAt = source === 'screen' ? this.clock.now() : -Infinity
     const total = a.plan.steps.length
     const last = index === total - 1
     this.deps.bus.emit('lesson:step', { lessonId: a.lessonId, skillId: a.skillId, stepIndex: index, stepCount: total, phase: 'verified', step })
     const level = a.stepLevel
     this.deps.overlay.clear(ANNOTATION_IDS.filter((id) => id !== 'runner-tick'))
     if (a.box && level <= 3) this.deps.overlay.show([{ id: 'runner-tick', kind: 'tick', tone: 'success', box: a.box, ok: true, ttlMs: this.cfg.tickMs }])
-    const ack = verifiedDirective(index + 1, total, level, last)
+    // At L4 the learner works alone: say nothing between steps.
+    const ack = level >= 4 && !last ? '' : verifiedDirective(index + 1, total, level, last)
     if (last) {
       await this.completeLesson(a, false, ack)
       return
     }
     // Adaptive fading inside the lesson: the help eases off for the remaining steps as competence shows
     // (and comes back after two struggling steps). The chip animates; the model is told in the same message.
-    const done = completeStep(a.attempt, { remainingSteps: total - index - 1, locked: this.isLocked() })
+    const done = completeStep(a.attempt, { remainingSteps: total - index - 1, locked: this.isLocked(), maxLevel: this.levelCap(a.plan) })
     a.attempt = done.state
-    let lead = `${ack} `
+    let lead = ack ? `${ack} ` : ''
     if (done.change !== 'none') {
       const reason = done.change === 'fade' ? 'two steps without help, so the help eases off' : 'two steps in a row needed help, so more help is back'
       this.setChip(a, done.to, reason, 'attempt')
@@ -730,12 +804,13 @@ export class LessonRunnerImpl implements LessonRunner {
     if (silent) this.deps.overlay.clear(ANNOTATION_IDS)
     const settings = this.deps.getSettings()
     const def = SKILLS[a.skillId]
+    const rubric = a.skillId === 'custom' ? a.plan.steps.map((st) => st.instruction) : def.teachBackRubric
     this.deps.bus.emit('lesson:step', { lessonId: a.lessonId, skillId: a.skillId, stepIndex: a.plan.steps.length - 1, stepCount: a.plan.steps.length, phase: 'done' })
-    this.deps.live.inject(`${lead}${lessonCompleteDirective({ skillName: def.name, teachBack: settings.teachBack, rubric: def.teachBackRubric, retrievalQuestion: def.retrievalQuestion })}`)
+    this.deps.live.inject(`${lead}${lessonCompleteDirective({ skillName: this.lessonName(a), teachBack: settings.teachBack, rubric, retrievalQuestion: def.retrievalQuestion })}`)
     const token = a.token
     a.endTimer = this.clock.setTimeout(() => {
       if (!this.active || this.active.token !== token) return
-      void this.end(`Finished "${def.name}".`)
+      void this.end(`Finished "${this.lessonName(a)}".`)
     }, this.cfg.endTimeoutMs)
   }
 
@@ -794,11 +869,12 @@ export class LessonRunnerImpl implements LessonRunner {
   }
 
   async abort(reason = 'aborted'): Promise<void> {
+    this.startSeq++ // also cancels a start() that is still planning
     const a = this.active
     if (!a) return
     // A learner who finished every step but never got to the teach-back still gets their attempt counted.
     if (a.finished && !a.ended) {
-      await this.end(`Finished "${SKILLS[a.skillId].name}".`)
+      await this.end(`Finished "${this.lessonName(a)}".`)
       return
     }
     await this.teardown(reason, true)

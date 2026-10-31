@@ -9,7 +9,7 @@ import { CaptionBand, LevelChipEcho, speakerLabel } from './annotations/chrome'
 import { Defs, overlayCss } from './annotations/common'
 import { GhostCursor } from './annotations/GhostCursor'
 import { normToPx, type Size } from './geometry'
-import { CHIP_TOP, captionRect, chipRect, labelKey, planScene } from './scene-plan'
+import { CHIP_TOP, chipRect, chooseCaptionRect, labelKey, planScene } from './scene-plan'
 import type { OverlayState } from './store'
 
 export interface SceneProps {
@@ -22,11 +22,13 @@ export interface SceneProps {
   freezeGhostMs?: number | null
   // Harness stills render bubbles fully typed.
   typeBubbles?: boolean
+  // Harness only: freeze the level-chip echo at this point of its change animation (0 = before, 1 = after).
+  chipProgress?: number
 }
 
 const RANK: Record<string, number> = { spotlight: 0, highlightText: 1, ring: 2, arrow: 3, tick: 4, badge: 5, ghostCursor: 6, bubble: 7 }
 
-export function OverlayScene({ state, viewport, style, captionsEnabled, speakerNames = {}, freezeGhostMs = null, typeBubbles = true }: SceneProps): ReactElement {
+export function OverlayScene({ state, viewport, style, captionsEnabled, speakerNames = {}, freezeGhostMs = null, typeBubbles = true, chipProgress }: SceneProps): ReactElement {
   const [sizes, setSizes] = useState<Record<string, Size>>({})
   const onSize = useCallback((id: string, size: Size) => {
     setSizes((prev) => {
@@ -37,13 +39,12 @@ export function OverlayScene({ state, viewport, style, captionsEnabled, speakerN
   }, [])
 
   const showCaption = captionsEnabled && state.caption !== null
-  const chrome = useMemo(
-    () => ({
-      caption: showCaption ? captionRect(sizes.caption ?? { width: style.caption.maxWidth * 0.6, height: style.caption.fontSize * 3.6 }, viewport, style) : undefined,
-      chip: state.chip ? chipRect(sizes.chip ?? { width: 260 * style.scale, height: style.levelChip.fontSize * 2 }, viewport, CHIP_TOP) : undefined,
-    }),
-    [showCaption, state.chip, sizes.caption, sizes.chip, viewport, style],
-  )
+  const captionSize = sizes.caption ?? { width: style.caption.maxWidth * 0.6, height: style.caption.fontSize * 3.6 }
+  const chip = useMemo(() => (state.chip ? chipRect(sizes.chip ?? { width: 260 * style.scale, height: style.levelChip.fontSize * 2 }, viewport, CHIP_TOP) : undefined), [state.chip, sizes.chip, viewport, style])
+  // Two passes: first the marks (without captions), then the caption goes where it covers none of them.
+  const marks = useMemo(() => planScene(state.annotations, viewport, style, sizes, { chip }).marks, [state.annotations, viewport, style, sizes, chip])
+  const captionPlace = useMemo(() => (showCaption ? chooseCaptionRect(marks, captionSize, viewport, style, chip) : null), [showCaption, marks, captionSize, viewport, style, chip])
+  const chrome = useMemo(() => ({ caption: captionPlace?.rect, chip }), [captionPlace, chip])
   const plan = useMemo(() => planScene(state.annotations, viewport, style, sizes, chrome), [state.annotations, viewport, style, sizes, chrome])
   const css = useMemo(() => overlayCss(style), [style])
   const entries = useMemo(() => [...state.annotations].sort((a, b) => (RANK[a.annotation.kind] ?? 9) - (RANK[b.annotation.kind] ?? 9)), [state.annotations])
@@ -116,8 +117,8 @@ export function OverlayScene({ state, viewport, style, captionsEnabled, speakerN
         }
         return null
       })}
-      {showCaption && state.caption ? <CaptionBand caption={state.caption} speakerName={speakerLabel(state.caption.speaker, speakerNames)} style={style} viewport={viewport} onSize={onSize} /> : null}
-      {state.chip ? <LevelChipEcho chip={state.chip} style={style} top={CHIP_TOP} onSize={onSize} /> : null}
+      {showCaption && state.caption ? <CaptionBand caption={state.caption} topY={captionPlace?.atTop ? captionPlace.rect.y : null} speakerName={speakerLabel(state.caption.speaker, speakerNames)} style={style} viewport={viewport} onSize={onSize} /> : null}
+      {state.chip ? <LevelChipEcho chip={state.chip} style={style} top={CHIP_TOP} onSize={onSize} progress={chipProgress} /> : null}
     </div>
   )
 }

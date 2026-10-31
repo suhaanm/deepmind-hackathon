@@ -51,6 +51,7 @@ describe('spawn_agent through the dispatcher', () => {
     expect(res).toHaveProperty('agentId')
     expect(t.state.get().agents[0]).toMatchObject({ kind: 'scam_check', status: 'running' })
     await until(() => t.state.get().agents[0]?.status === 'done', 5000)
+    await until(() => t.shown.flat().some((a) => a.kind === 'bubble'), 3000)
     // Progress updates add extra running events; the chip only ever finishes once, at the end.
     expect(t.events[0]).toBe('scam_check:running')
     expect(t.events.at(-1)).toBe('scam_check:done')
@@ -81,6 +82,7 @@ describe('spawn_agent through the dispatcher', () => {
     const t = setup()
     await t.dispatch('spawn_agent', { kind: 'scam_check', task: 'x', payload: { text: 'Tap here to verify your account now.' } })
     await until(() => t.state.get().agents[0]?.status === 'done', 5000)
+    await until(() => t.shown.flat().some((a) => a.kind === 'bubble'), 3000)
     t.cleared.length = 0
     await t.dispatch('clear_annotations', {})
     expect(t.cleared.some((ids) => ids?.some((id) => id.includes('-flag-') || id.endsWith('-advice')))).toBe(true)

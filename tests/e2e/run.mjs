@@ -3,6 +3,7 @@
 //        --visible (show windows; needed for real screen capture / accuracy runs) --no-build --stage (also serve apps/demo-stage)
 //        --accuracy (run the real-screen accuracy harness instead; writes docs/QA_ACCURACY.md; needs --mode real --visible)
 //        --with-accuracy (run the scenarios, then the accuracy harness in the same app launch)
+//        --record | --replay [hybrid] (save / serve Gemini HTTP responses in .userdata-replay)
 //        --grep <pattern> | --files a,b (vitest file filters)
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
@@ -70,7 +71,7 @@ async function waitHealth(app, ms) {
 let app = null
 let stageProc = null
 function killAll() {
-  for (const proc of [app, stageProc]) {
+  for (const proc of [app]) {
     if (proc && proc.exitCode === null) proc.kill('SIGTERM')
   }
 }
@@ -92,20 +93,28 @@ try {
   if (await portOpen(debugPort)) throw new Error(`port ${debugPort} is already in use (is another instance running?)`)
 
   if (!(await portOpen(stagePort))) {
-    stageProc = spawn('node', ['scripts/stage-server.mjs'], { cwd: repo, stdio: 'ignore', env: { ...process.env, STAGE_PORT: String(stagePort) } })
+    // Left running on purpose: other roles use the same static server and a kill here would break their runs.
+    stageProc = spawn('node', ['scripts/stage-server.mjs'], { cwd: repo, stdio: 'ignore', detached: true, env: { ...process.env, STAGE_PORT: String(stagePort) } })
+    stageProc.unref()
     for (let i = 0; i < 20 && !(await portOpen(stagePort)); i++) await sleep(150)
   }
 
   const env = {
     ...process.env,
     ALONGSIDE_USERDATA: userData,
+    ALONGSIDE_DEBUG: '1', // the debug HTTP server is opt-in (unauthenticated); tests need it
     ALONGSIDE_DEBUG_PORT: String(debugPort),
     ALONGSIDE_DEV_PORT: String(devPort),
     ALONGSIDE_DEV_STAGE: '1',
     ALONGSIDE_LOCK_WAIT: process.env.ALONGSIDE_LOCK_WAIT || '240',
     ALONGSIDE_LOCK_MAX_SECONDS: process.env.ALONGSIDE_LOCK_MAX_SECONDS || '420',
     STAGE_PORT: String(stagePort),
+    ALONGSIDE_ACTUATOR_DRYRUN: '1', // tests must never click, type or open real things
   }
+  // Venue-Wi-Fi backup: --record saves every Gemini HTTP response; --replay[=hybrid] serves them offline (see src/main/dev/replay).
+  if (flag('record') || flag('replay')) env.ALONGSIDE_REPLAY_DIR = path.join(repo, '.userdata-replay')
+  if (flag('record')) env.ALONGSIDE_RECORD = '1'
+  if (flag('replay')) env.ALONGSIDE_REPLAY = opt('replay', '1') === 'hybrid' ? 'hybrid' : '1'
   if (mode === 'mock') env.ALONGSIDE_MOCK = '1'
   else delete env.ALONGSIDE_MOCK
   if (!visible) env.ALONGSIDE_HEADLESS = '1'
@@ -129,8 +138,14 @@ try {
   }
 
   const vitestArgs = ['run', '--config', flag('accuracy') ? 'tests/e2e/vitest.acc.config.ts' : 'tests/e2e/vitest.e2e.config.ts', '--reporter', 'verbose']
-  const files = opt('files', '')
-  if (files) vitestArgs.push(...files.split(','))
+  // The privacy/spend check reads the request log, so it must run after everything else that talks to Gemini.
+  const privacyFile = '08-privacy-spend'
+  const requested = opt('files', '').split(',').filter(Boolean)
+  const privacyLast = !flag('accuracy') && (requested.length === 0 || requested.some((f) => f.includes(privacyFile)))
+  const first = requested.filter((f) => !f.includes(privacyFile))
+  const skipFirstPass = requested.length > 0 && first.length === 0
+  if (first.length) vitestArgs.push(...first)
+  else if (!flag('accuracy')) vitestArgs.push('--exclude', `tests/e2e/${privacyFile}.e2e.ts`)
   const grep = opt('grep', '')
   if (grep) vitestArgs.push('-t', grep)
   const testEnv = {
@@ -143,7 +158,11 @@ try {
     E2E_VISIBLE: visible ? '1' : '0',
     VITE_CONFIG_NATIVE_IGNORE_WARNING: 'true',
   }
-  exitCode = await run('node_modules/.bin/vitest', vitestArgs, testEnv)
+  exitCode = skipFirstPass ? 0 : await run('node_modules/.bin/vitest', vitestArgs, testEnv)
+  if (privacyLast) {
+    const code = await run('node_modules/.bin/vitest', ['run', '--config', 'tests/e2e/vitest.e2e.config.ts', '--reporter', 'verbose', `tests/e2e/${privacyFile}.e2e.ts`], testEnv)
+    exitCode = exitCode || code
+  }
   if (flag('with-accuracy')) {
     // Same app launch (one lock slot): the accuracy harness runs after the scenarios.
     const accCode = await run('node_modules/.bin/vitest', ['run', '--config', 'tests/e2e/vitest.acc.config.ts', '--reporter', 'verbose'], testEnv)

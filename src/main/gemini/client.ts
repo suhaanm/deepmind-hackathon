@@ -4,6 +4,7 @@ import { GoogleGenAI } from '@google/genai'
 import { config as loadEnv } from 'dotenv'
 import type { ZodType } from 'zod'
 import { MODELS } from '../../shared/models'
+import { redactText, redactingLog } from './redact'
 import type { Shot, ShotPurpose } from '../../shared/protocol'
 
 export type Models = typeof MODELS
@@ -35,7 +36,21 @@ export interface GeminiDeps {
   capture?: { grab(purpose: ShotPurpose): Promise<Shot> }
 }
 
-export type GeminiErrorCode = 'timeout' | 'api' | 'parse' | 'empty' | 'no_input'
+export type GeminiErrorCode = 'timeout' | 'api' | 'parse' | 'empty' | 'no_input' | 'auth' | 'rate_limit' | 'network'
+
+// What a person should hear for each kind of failure (plain English, no codes, no blame, no guessing).
+const PLAIN: Record<GeminiErrorCode, string> = {
+  auth: "I can't use my online helper because it isn't set up yet.",
+  rate_limit: "I'm getting too many requests right now. Please try again in a moment.",
+  network: "I can't reach the internet right now.",
+  timeout: 'That is taking too long.',
+  parse: 'I got a muddled answer and did not trust it.',
+  empty: 'I did not get an answer.',
+  no_input: 'There was nothing to look at.',
+  api: 'Something went wrong on my side.',
+}
+export const plainByCode = (code: string): string => PLAIN[code as GeminiErrorCode] ?? PLAIN.api
+
 export class GeminiError extends Error {
   constructor(
     public readonly code: GeminiErrorCode,
@@ -45,7 +60,16 @@ export class GeminiError extends Error {
     super(message)
     this.name = 'GeminiError'
   }
+  get userMessage(): string {
+    return plainByCode(this.code)
+  }
 }
+
+/** Plain-English line for any thrown value. */
+export const plainFailure = (e: unknown): string => (e instanceof GeminiError ? e.userMessage : PLAIN.api)
+
+/** Failures where saying exactly what is wrong helps (and is safe); the rest stay generic. */
+export const isEnvironmental = (e: unknown): boolean => e instanceof GeminiError && (e.code === 'auth' || e.code === 'network' || e.code === 'rate_limit')
 
 /**
  * The one place the SDK client is built. The key is read from env (dotenv fallback) and never logged.
@@ -71,7 +95,12 @@ export function createAi(): AiLike {
 }
 
 export function createGeminiDeps(opts: { log: Log; capture?: GeminiDeps['capture']; ai?: AiLike }): GeminiDeps {
-  return { ai: opts.ai ?? createAi(), models: MODELS, log: opts.log, capture: opts.capture }
+  return { ai: opts.ai ?? createAi(), models: MODELS, log: redactingLog(opts.log), capture: opts.capture }
+}
+
+/** Every service factory runs its deps through this, so logging is redacted even when deps were built by hand. */
+export function withSafeLog(deps: GeminiDeps): GeminiDeps {
+  return { ...deps, log: redactingLog(deps.log) }
 }
 
 // ---------- latency stats (for the final report and live tests) ----------
@@ -173,7 +202,8 @@ export async function callModel(deps: GeminiDeps, o: CallOptions): Promise<CallR
   }
   const status = statusOf(last)
   if (Date.now() >= deadline - 400 && last === undefined) throw new GeminiError('timeout', `${o.name} timed out after ${o.timeoutMs}ms`)
-  throw new GeminiError('api', `${o.name} failed: ${String((last as Error | undefined)?.message ?? last).slice(0, 300)}`, status)
+  const code: GeminiErrorCode = status === 401 || status === 403 ? 'auth' : status === 429 ? 'rate_limit' : status === undefined ? 'network' : 'api'
+  throw new GeminiError(code, `${o.name} failed: ${redactText(String((last as Error | undefined)?.message ?? last)).slice(0, 200)}`, status)
 }
 
 // ---------- structured output helpers ----------

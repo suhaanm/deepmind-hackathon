@@ -20,9 +20,10 @@ interface RunningAgent {
   settled: boolean
 }
 
+// Highlights are drawn one at a time as they are located, each with its own expiry.
 interface HighlightGroup {
-  ids: string[]
-  timer: ReturnType<typeof setTimeout>
+  ids: Set<string>
+  timers: Set<ReturnType<typeof setTimeout>>
 }
 
 export interface AgentRuntimeApi extends AgentRuntime {
@@ -78,30 +79,42 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
     }
   }
 
-  function clearAgentHighlights(agentId: string): void {
-    const group = highlights.get(agentId)
-    if (!group) return
-    clearTimeout(group.timer)
-    highlights.delete(agentId)
+  function clearOverlayIds(ids: string[]): void {
     try {
-      deps.overlay.clear(group.ids)
+      deps.overlay.clear(ids)
     } catch (err) {
       logAgentError('overlay.clear', err)
     }
   }
 
+  function clearAgentHighlights(agentId: string): void {
+    const group = highlights.get(agentId)
+    if (!group) return
+    highlights.delete(agentId)
+    for (const timer of group.timers) clearTimeout(timer)
+    clearOverlayIds([...group.ids])
+  }
+
   function showHighlights(agentId: string, signal: AbortSignal, annotations: Annotation[], ttlMs: number): void {
     if (signal.aborted || annotations.length === 0) return
-    clearAgentHighlights(agentId)
     try {
       deps.overlay.show(annotations)
     } catch (err) {
       logAgentError('overlay.show', err)
       return
     }
-    const timer = setTimeout(() => clearAgentHighlights(agentId), ttlMs)
+    const group = highlights.get(agentId) ?? { ids: new Set<string>(), timers: new Set<ReturnType<typeof setTimeout>>() }
+    highlights.set(agentId, group)
+    const ids = annotations.map((a) => a.id)
+    for (const id of ids) group.ids.add(id)
+    const timer = setTimeout(() => {
+      group.timers.delete(timer)
+      for (const id of ids) group.ids.delete(id)
+      clearOverlayIds(ids)
+      if (group.ids.size === 0 && group.timers.size === 0) highlights.delete(agentId)
+    }, ttlMs)
     timer.unref?.()
-    highlights.set(agentId, { ids: annotations.map((a) => a.id), timer })
+    group.timers.add(timer)
   }
 
   function inject(text: string): void {
@@ -115,8 +128,6 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
   function settle(run: RunningAgent, status: AgentChip['status'], summary: string, outcome?: AgentOutcome, tell?: string): void {
     if (run.settled) return
     run.settled = true
-    clearTimeout(run.timer)
-    running.delete(run.chip.id)
     run.chip = {
       ...run.chip,
       status,
@@ -147,6 +158,8 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
       signal,
       now,
       progress: (message) => progress(run, message),
+      // Lets an agent hand over its result the moment it exists and keep working (e.g. drawing highlights).
+      announce: (outcome) => settle(run, 'done', outcome.summary, outcome, outcome.tell),
       highlights: { show: (annotations, ttlMs) => showHighlights(run.chip.id, signal, annotations, ttlMs) },
     }
     const aborted = new Promise<never>((_, reject) => {
@@ -157,7 +170,12 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
       const outcome = await Promise.race([Promise.resolve().then(() => agent.execute(deps, scope, { agentId: run.chip.id, task, payload, signal })), aborted])
       settle(run, 'done', outcome.summary, outcome, outcome.tell)
     } catch (err) {
-      if (run.settled) return
+      if (run.settled) {
+        // Already announced: a stop or timeout only ends the follow-up work, and takes its highlights away.
+        if (signal.aborted) clearAgentHighlights(run.chip.id)
+        else logAgentError(agent.kind, err)
+        return
+      }
       if (signal.aborted && signal.reason instanceof AgentCancelledError) {
         settle(run, 'cancelled', 'Stopped.')
         return
@@ -166,6 +184,10 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
       if (!timedOut && !(err instanceof AgentUserError)) logAgentError(agent.kind, err)
       const message = timedOut ? toPlainMessage(new AgentTimeoutError()) : toPlainMessage(err)
       settle(run, 'error', message, undefined, `The ${agent.kind.replace('_', ' ')} could not be finished. ${message} Tell the user kindly in one short sentence and offer to try again.`)
+    } finally {
+      // The slot (and timeout) are held until the follow-up work ends, not just until the result is announced.
+      clearTimeout(run.timer)
+      running.delete(run.chip.id)
     }
   }
 
@@ -199,6 +221,7 @@ export function createAgentRuntime(deps: AgentDeps, agents: readonly RegisteredA
       void execute(agent, run, cleanTask, cleanPayload).catch((err) => {
         logAgentError(kind, err)
         settle(run, 'error', GENERIC_MESSAGE)
+        running.delete(id)
       })
       return { agentId: id }
     },

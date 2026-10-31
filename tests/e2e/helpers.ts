@@ -21,6 +21,7 @@ export async function api<T = unknown>(base: string, route: string, body?: unkno
     method: method ?? (body === undefined ? 'GET' : 'POST'),
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(Number(process.env.E2E_HTTP_TIMEOUT_MS ?? 25_000)),
   })
   const text = await res.text()
   let parsed: unknown = text
@@ -150,6 +151,20 @@ export function rawRequest(opts: { port: number; host?: string; headers?: Record
   })
 }
 
+// Saves dock.png + overlay.png under docs/qa-shots for visual review (UX defects). Never throws.
+export async function saveShots(tag: string): Promise<void> {
+  try {
+    const dir = path.join(REPO, 'docs', 'qa-shots')
+    fs.mkdirSync(dir, { recursive: true })
+    for (const [name, route] of [['dock', '/dock.png'], ['overlay', '/overlay.png']] as const) {
+      const res = await fetch(`${DEBUG}${route}`)
+      if (res.ok) fs.writeFileSync(path.join(dir, `${tag}-${name}.png`), Buffer.from(await res.arrayBuffer()))
+    }
+  } catch {
+    // screenshots are evidence only
+  }
+}
+
 export const portOf = (url: string) => Number(new URL(url).port)
 
 // Plain-English check for user-facing error text: no stack frames, raw JSON, SDK class names or status codes.
@@ -237,6 +252,43 @@ export function opaqueBounds(r: Raster, minAlpha = 24): { x: number; y: number; 
     }
   }
   return count ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, count } : null
+}
+
+// Flood-fills the not-inked area around (cx, cy). When the annotation is a closed ring around that point the fill stays inside and
+// its bounds are the ring's inner hole (px); when the fill reaches the image border the point is not enclosed (null).
+export function enclosedHole(r: Raster, cx: number, cy: number, inkAlpha = 120): { x: number; y: number; w: number; h: number } | null {
+  if (r.channels !== 4) return null
+  const w = r.width
+  const h = r.height
+  const start = Math.round(cy) * w + Math.round(cx)
+  const ink = (i: number) => r.data[i * 4 + 3] >= inkAlpha
+  if (start < 0 || start >= w * h || ink(start)) return null
+  const seen = new Uint8Array(w * h)
+  const stack = new Int32Array(w * h)
+  let sp = 0
+  stack[sp++] = start
+  seen[start] = 1
+  let x0 = w
+  let y0 = h
+  let x1 = -1
+  let y1 = -1
+  while (sp > 0) {
+    const i = stack[--sp]
+    const x = i % w
+    const y = (i - x) / w
+    if (x === 0 || y === 0 || x === w - 1 || y === h - 1) return null
+    if (x < x0) x0 = x
+    if (x > x1) x1 = x
+    if (y < y0) y0 = y
+    if (y > y1) y1 = y
+    for (const n of [i - 1, i + 1, i - w, i + w]) {
+      if (!seen[n] && !ink(n)) {
+        seen[n] = 1
+        stack[sp++] = n
+      }
+    }
+  }
+  return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
 }
 
 export function iou(a: NormBox, b: NormBox): number {

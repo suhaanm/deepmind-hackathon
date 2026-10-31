@@ -492,3 +492,8 @@ body::before {
   animation: none;
   stroke-dashoffset: 0;
 }
+
+.pv-profilehost {
+  position: relative;
+  min-height: 420px;
+}

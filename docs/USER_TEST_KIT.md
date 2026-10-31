@@ -16,7 +16,7 @@ npm run stage          # practice desktop at http://127.0.0.1:5180
 ```
 
 1. Open `http://127.0.0.1:5180` full screen. Everything on it is fake (a video-call app, a messages app, a settings app). Do not use real accounts, banking or messages.
-2. Leave settings at their defaults (`demoMode` on, captions on, big annotations on). **Write down the settings you used** in the notes. Do not use the demo seed profile for a real person.
+2. Leave settings at their defaults (`demoMode` on, captions on, big annotations on). **Write down the settings you used** in the notes. Do not use the demo seed profile for a real person: a fresh profile starts every skill at L1 "Watch me" (a ghost cursor shows each step first, then they try), and the assistant stays quiet unless spoken to, so they must ask for something. If you reuse a profile folder, `rm "$ALONGSIDE_USERDATA/profile.md"` returns it to a blank first-time learner.
 3. Check it works once yourself with the hotkey `Cmd+Alt+Space` (the persona should greet), then press Stop. Reload the practice desktop.
 4. Decide how they start a session: **say the wake name** (see `src/shared/personas.ts`), or you press the hotkey for them if the room is noisy. Note which you used.
 

@@ -330,8 +330,8 @@ export function annotationStyle(settings: AnnotationStyleSettings, options: Anno
       },
     },
     levelChip: {
-      fontSize: px(22),
-      padding: { x: px(18), y: px(10) },
+      fontSize: px(28),
+      padding: { x: px(22), y: px(12) },
       radius: px(999),
       background: 'rgba(11, 18, 32, 0.94)',
       color: '#FFFFFF',

@@ -10,7 +10,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "stage": "node scripts/stage-server.mjs",
-    "e2e": "node tests/e2e/run.mjs"
+    "e2e": "node tests/e2e/run.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "demo": "bash scripts/demo.sh",
+    "submit-check": "node scripts/submit-check.mjs"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "5.3.0",

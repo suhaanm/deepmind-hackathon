@@ -85,7 +85,7 @@ export function planArrow(input: PlanArrowInput): ArrowPlan {
     const span = distance(start, tip)
     if (dir && span < style.minLength) start = clampPoint({ x: tip.x - dir.x * style.minLength, y: tip.y - dir.y * style.minLength }, vp, margin)
   } else {
-    const wanted = Math.max(style.minLength, style.headLength * 6)
+    const wanted = Math.max(style.minLength, style.headLength * 4.2)
     let best: { score: number; start: Pt; tip: Pt } | null = null
     APPROACH.forEach((dir, index) => {
       const t = boundaryDistance(half, dir)

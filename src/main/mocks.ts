@@ -140,6 +140,10 @@ const STATIC_STEPS: Record<SkillId, { goal: string; steps: LessonStep[] }> = {
       step(3, 'Decide: ring your bank on the number on your card.', 'the Delete message button', 'The message has been deleted without clicking the link', 'Never use the number in the message.', 'Click Delete, then ring the number on your card.', 'Bottom of the message.', true),
     ],
   },
+  custom: {
+    goal: 'Work something out together',
+    steps: [step(0, 'Look at the highlighted part.', 'the control the learner asked about', 'The learner has found it', 'This is the thing you asked about.', 'Look where the arrow points.', 'Look in the middle of the window.')],
+  },
   bigger_text: {
     goal: 'Make the text bigger',
     steps: [
@@ -318,7 +322,6 @@ export function mockRunner(ctx: ServiceContext, s: Services): LessonRunner {
     s.overlay.show([
       { id: 'runner-ring', kind: 'ring', tone: 'guide', box: res.box, label: current.instruction, step: index + 1 },
       { id: 'runner-arrow', kind: 'arrow', tone: 'guide', to: res.box },
-      { id: 'runner-badge', kind: 'badge', tone: 'guide', at: { x: res.box.xmin, y: res.box.ymin }, n: index + 1 },
     ])
   }
 

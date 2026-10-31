@@ -87,3 +87,13 @@ export function lessonCompleteDirective(opts: { skillName: string; teachBack: bo
   }
   return `[RUNNER] lesson "${oneLine(opts.skillName)}" complete. Now do the teach-back: (1) ask them to say in their own words how they would do it next time; (2) silently score 0 to 1 against: ${opts.rubric.map(oneLine).join('; ')}; if under 0.67 re-explain the missing part with a different comparison and ask once more; (3) ask: "${oneLine(opts.retrievalQuestion)}"; (4) ask for a confidence number from 1 to 5; (5) call end_lesson with summary, teachBackScore and confidence. If they decline any part, skip it without fuss.`
 }
+
+// Sent before a novel goal is planned: keep the assistant talking and honest while the architect works.
+export function planningDirective(goal: string): string {
+  return `[RUNNER] The learner asked for something new: "${oneLine(goal).slice(0, 160)}". The app is looking at their screen to work out the steps. Say one short natural line such as that you will have a look at the screen and work out the steps. Do not guess any steps yet.`
+}
+
+// The architect could not plan in time: say so, and only point.
+export function pointerFallbackDirective(): string {
+  return '[RUNNER] The detailed plan could not be worked out in time. Be honest in one short sentence: you could not work out all the steps, but you will show them where to look. Do not invent steps.'
+}

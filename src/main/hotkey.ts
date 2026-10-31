@@ -7,9 +7,10 @@ import type { StateStore } from './state'
 import { DEFAULT_PERSONA } from '../shared/personas'
 import type { SessionEndReason } from '../shared/protocol'
 
-// macOS reserves some combos (Cmd+Alt+Esc is Force Quit, Cmd+Alt+Space is Finder search), so each action has fallbacks.
-export const START_ACCELERATORS = ['CommandOrControl+Alt+Space', 'Control+Alt+Space', 'CommandOrControl+Alt+Shift+S'] as const
-export const STOP_ACCELERATORS = ['CommandOrControl+Alt+M', 'CommandOrControl+Alt+Escape', 'CommandOrControl+Alt+Shift+X'] as const
+// Several combos per action because macOS or another app may own one. Deliberately NOT bound: Cmd+Alt+Esc (Force Quit,
+// the presenter's escape hatch if the app hangs) and Ctrl+Alt+Space (switches input source for multilingual users).
+export const START_ACCELERATORS = ['CommandOrControl+Alt+Space', 'CommandOrControl+Alt+Shift+Space', 'CommandOrControl+Alt+Shift+S'] as const
+export const STOP_ACCELERATORS = ['CommandOrControl+Alt+M', 'CommandOrControl+Alt+Shift+X'] as const
 
 const ACTIVE = new Set(['connecting', 'live', 'thinking', 'speaking'])
 

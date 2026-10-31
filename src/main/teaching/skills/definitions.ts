@@ -1,5 +1,6 @@
 // Static facts about the three skills we teach. Pure data; no I/O. Fallback lesson plans live in plans.ts.
-import type { SkillId } from '../../../shared/protocol'
+import { BUILTIN_SKILL_IDS } from '../../../shared/protocol'
+import type { BuiltinSkillId, SkillId } from '../../../shared/protocol'
 
 // UK Essential Digital Skills categories (framework tagging for credibility; see research/04 section 1.6).
 export type EdsCategory = 'communicating' | 'safe_and_legal' | 'foundation'
@@ -25,7 +26,7 @@ export interface SkillDefinition {
   commonMistakes: string[]
 }
 
-export const SKILLS: Record<SkillId, SkillDefinition> = {
+const BUILTIN_DEFS: Record<BuiltinSkillId, SkillDefinition> = {
   video_call: {
     id: 'video_call',
     name: 'Start a video call',
@@ -80,6 +81,24 @@ export const SKILLS: Record<SkillId, SkillDefinition> = {
   },
 }
 
+// 'custom' is the one generic skill behind every Argon-planned lesson (goals outside the three built-ins).
+const CUSTOM_DEF: SkillDefinition = {
+  id: 'custom',
+  name: 'Something new',
+  shortName: 'Something new',
+  edsCategory: 'foundation',
+  canDo: 'Work out a new task on the screen with help',
+  analogy: 'Finding your way around a new place is easier when someone walks the first stretch with you.',
+  jargonMap: {},
+  keywords: [],
+  teachBackRubric: [],
+  retrievalQuestion: 'Can you point to where you would do that?',
+  commonMistakes: [],
+}
+
+export const SKILLS: Record<SkillId, SkillDefinition> = { ...BUILTIN_DEFS, custom: CUSTOM_DEF }
+
+export const BUILTIN_SKILL_LIST: SkillDefinition[] = BUILTIN_SKILL_IDS.map((id) => SKILLS[id])
 export const SKILL_LIST: SkillDefinition[] = Object.values(SKILLS)
 
 export function skillName(id: SkillId): string {
@@ -101,11 +120,11 @@ export function matchSkillName(text: string): SkillId | null {
 }
 
 // Goal text -> skill. Highest keyword hit count wins; ties go to the earlier skill in SKILL_LIST order.
-export function pickSkill(goal: string): SkillId | null {
-  let best: { id: SkillId; hits: number } | null = null
-  for (const def of SKILL_LIST) {
+export function pickSkill(goal: string): BuiltinSkillId | null {
+  let best: { id: BuiltinSkillId; hits: number } | null = null
+  for (const def of BUILTIN_SKILL_LIST) {
     const hits = def.keywords.reduce((n, re) => n + (re.test(goal) ? 1 : 0), 0)
-    if (hits > 0 && (!best || hits > best.hits)) best = { id: def.id, hits }
+    if (hits > 0 && (!best || hits > best.hits)) best = { id: def.id as BuiltinSkillId, hits }
   }
   return best ? best.id : null
 }

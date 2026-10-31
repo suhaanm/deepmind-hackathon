@@ -11,9 +11,10 @@ const wav = process.env.WAKE_FAKE_WAV
 app.setPath('userData', fs.mkdtempSync(path.join(os.tmpdir(), 'wake-harness-')))
 app.commandLine.appendSwitch('use-fake-device-for-media-stream')
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
-if (wav) app.commandLine.appendSwitch('use-file-for-fake-audio-capture', wav)
 app.dock?.hide()
 
+// Chromium's file-backed fake mic returned pure silence on this macOS (any WAV format); the page instead synthesises a MediaStream from the WAV.
+ipcMain.handle('wake:wav', () => fs.readFileSync(wav))
 ipcMain.handle('wake:token', async () => {
   const { GoogleGenAI, Modality } = await import('@google/genai')
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1beta' } })
@@ -31,6 +32,6 @@ app.whenReady().then(async () => {
     const msg = e.message ?? ''
     if (/^(WAKE|STATUS|DEBUG|ERROR)/.test(msg)) console.log(`[+${Date.now() - t0}ms]`, msg)
   })
-  await win.loadFile(path.join(__dirname, 'page.html'), process.env.WAKE_PROBE ? { search: 'probe' } : undefined)
+  await win.loadFile(path.join(__dirname, 'page.html'), process.env.WAKE_PROBE ? { search: process.env.WAKE_PROBE === 'raw' ? 'probe&raw' : 'probe' } : undefined)
   setTimeout(() => app.quit(), Number(process.env.WAKE_HARNESS_MS ?? 25000))
 })

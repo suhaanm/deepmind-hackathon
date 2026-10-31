@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { GoogleGenAI } from '@google/genai'
-import { NO_MESSAGE, citedHosts, createAgentModelPort } from './gemini-port'
+import { citedHosts, createAgentModelPort } from './gemini-port'
 import { AgentUserError } from './errors'
-import { makeShot } from './fakes.test-util'
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -63,15 +62,6 @@ describe('agent model port', () => {
     expect(params.store).toBe(false)
     expect(JSON.stringify(params)).not.toMatch(/function_declarations|"type":"function"/)
     expect(options).toEqual({ signal })
-  })
-
-  it('extraction sends the screenshot with store:false and no tools, and maps the no-message sentinel to empty', async () => {
-    const { client, calls } = fakeClient(NO_MESSAGE)
-    const port = createAgentModelPort(client)
-    const text = await port.extractMessage({ shot: makeShot(), signal: new AbortController().signal })
-    expect(text).toBe('')
-    expect(calls[0]!.params.tools).toBeUndefined()
-    expect(calls[0]!.params.store).toBe(false)
   })
 
   it('fails with a plain message, not a stack, when no API key is configured', async () => {

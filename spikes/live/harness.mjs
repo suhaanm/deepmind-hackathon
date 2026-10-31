@@ -41,6 +41,14 @@ export async function loadLive() {
   return import(`${outfile}?t=${Date.now()}`)
 }
 
+// The real TEACH system instruction (so behaviour tests see what the app sends).
+export async function realSystemInstruction(persona = 'marcus') {
+  const outfile = path.join(OUT, 'prompt.bundle.mjs')
+  await build({ entryPoints: [path.join(here, 'prompt-entry.mts')], bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'error', nodePaths: [path.join(REPO, 'node_modules')] })
+  const mod = await import(`${outfile}?t=${Date.now()}`)
+  return mod.realSystemInstruction(persona)
+}
+
 // ---------- auth ----------
 export async function mintAuth(mode = 'token') {
   if (mode === 'key') return { kind: 'key', value: KEY }

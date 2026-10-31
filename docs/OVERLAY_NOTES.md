@@ -56,14 +56,29 @@ Command semantics (`overlay-controller.ts`, `store.ts`):
 - `clear(ids?)` fades out; no ids clears every annotation (captions and the chip are separate).
 - Defaults when `ttlMs` is absent: ring/arrow/badge/spotlight/highlightText stay until cleared but never past a 120 s stale guard; tick 3.5 s; bubble 12 s; ghostCursor flight + 2.2 s.
 - `caption` text is the whole line so far; `final=true` starts the linger (3-9 s by length); an empty text dismisses it.
-- `chip` is shown for 6 s then fades (the dock owns the persistent chip).
+- `chip` is shown for 6 s then fades (the dock owns the persistent chip). When the level differs from the previous chip (remembered even after it faded) the echo draws the OLD bars, then drains them to the new level one frame later (top bar first, 90 ms apart) while the old label fades out and the new one fades in; reduced motion skips the animation.
 - Out-of-range coordinates are clamped to 0-1000, swapped box corners are fixed, NaN annotations are dropped (one bad drawing never blanks the rest).
 - A one-point ghost path flies in from the user's current mouse position.
 - Annotations are sent as soon as they are decided; nothing waits for speech.
 
 ## 7. Real-window verification
 
-(see below)
+`src/renderer/overlay/harness/real-check.sh` (one electron-lock hold, under 3 minutes) starts the built app with the real capture and overlay (wake spotter off), shows the STAGE page `http://127.0.0.1:5180/index.html?still=1#video/call-screen` in a second window over the primary display, and drives the app through the debug HTTP API. Evidence is in `docs/overlay-shots/real-*` and `real-check.json`.
+
+| Check | Result |
+|---|---|
+| Ring lands on the right element | A ring drawn from the stage's `video.call.mic` ground-truth rect encloses it and is centred within 0.15/1000 (about 0.25 px) of the element centre. Measured from `GET /overlay.png` pixels. |
+| Content protection | Ring pixels in the overlay's own PNG: 9194. In a `desktopCapturer` ground grab of the same screen: 22 (noise). The overlay is excluded. |
+| Click-through | A synthetic OS click (CGEvent, `click.swift`) at a point covered by the overlay (a ring was drawn over it) reached the window underneath (`reachedWindowBelow: true`). |
+| `ALONGSIDE_OVERLAY_CAPTURABLE=1` | The `live` grab shows the ring and the level-chip echo; the `ground` grab, taken with the overlay hidden, shows neither (`real-capturable-live-shot.jpg` vs `real-capturable-ground-shot.jpg`). |
+| Above a full-screen app | With a native full-screen window (its own Space) in front, the ring still sits on top of it (`real-fullscreen-live-shot.jpg`, capturable mode so the grab can see it). The menu bar auto-hides in that Space, as for any full-screen app. |
+| `point_at` via debug HTTP | `POST /tool point_at` (real grounder, "the grey Settings gear icon in the left sidebar") on the STAGE page returned `found:true, confidence 1` in 1.5 s; the ring it drew encloses the stage's `desk.icon.settings` ground-truth rect, centre 1.2 px / 5 px off (the grounder box includes the icon label), arrow and label beside it (`real-point-at.png` = ground shot with the overlay composited on top; numbers in `real-check.json`). The stage window is created with `enableLargerThanScreen`, so its page coordinates are display coordinates (origin 0,0). |
+
+Caveats found on the way:
+- The stage's bottom call-control bar sits where the macOS Dock is drawn (the Dock is above ordinary and floating windows), so a grounder asked for "the mute button" correctly answers `found:false` there. A real screen has the same problem; STAGE should keep targets above the Dock line for demos.
+- A frameless window positioned at y=0 is silently pushed below the macOS menu bar (and its bottom cropped) unless it is created with `enableLargerThanScreen: true`; the stage window in the harness (and the overlay in `windows.ts`) set it, and the harness measures the stage's real on-screen origin instead of assuming 0,0.
+- Two Electron processes with the same `userData` make the second one exit (Chromium singleton); every helper process uses its own temp profile.
+- Screen Recording is granted to the **responsible app**: a binary started from an agent shell inherits the host app's grant (`granted`), the same binary started with `open`/launchd (own responsible process) reports `denied`. For the latter grant `node_modules/electron/dist/Electron.app` (for a packaged build, Alongside.app) under System Settings > Privacy & Security > Screen & System Audio Recording, then quit and reopen it.
 
 ## 8. Headless render harness
 
@@ -71,8 +86,45 @@ Command semantics (`overlay-controller.ts`, `store.ts`):
 
 `src/renderer/overlay/harness/real-check.sh` runs the real-window checks (section 7).
 
+## 8b. "Do it for me" (opt-in actuator)
+
+Off by default (`settings.doItForMeAllowed = false`). Code: `src/main/actuator/**`, one case in `src/main/tools/dispatcher.ts`, the `do_it_for_me{target}` Live tool declaration in `src/renderer/live/tools.ts`. Result shape `{allowed, done, code, reason, label?, verified?, dryRun?}`.
+
+Flow of `do_it_for_me`:
+1. Refused with `setting_off` unless the learner switched it on (no screen is read in that case).
+2. The target is grounded with `precise:true` (not found -> `not_found`, nothing clicked).
+3. Refused (ring + bubble "I will leave this one to you.", the assistant teaches instead) when the grounded label or the target text matches, case-insensitively and by prefix: pay, purchase, buy, order, checkout, send, submit, delete, remove, erase, transfer, confirm, sign in, log in, password, card, allow, grant, install, accept; when the current lesson step is `safetyCritical` (tracked from `lesson:step` bus events); or during a scam check (a running `scam_check` agent chip or the `spot_scam` skill).
+4. Without the Accessibility permission (`systemPreferences.isTrustedAccessibilityClient(false)`, which never prompts) it shows ring + ghost cursor and returns `accessibility`; the assistant explains and teaches instead. It never asks macOS for the permission by itself.
+5. Otherwise it shows ring + ghost-cursor path and calls the existing `ask_user_confirm` ("I'll click "<label>" for you. OK?", options `Yes, do it` / `No, I will`). Only the exact approve label from a real dock click approves; null (dismissed or timed out) and any other string mean no. The approval is consumed by that one call.
+6. `clickAt(point)`: exactly one left click, mapped from the 0-1000 point through the primary display bounds to points (not device pixels), done with `osascript -e 'tell application "System Events" to click at {x, y}'` (only integers are interpolated). No typing, no keys, no drags, no sequences.
+7. After the click it waits 0.7 s, grabs a `verify` shot, asks the Verifier whether the screen visibly changed, and shows a tick (or the gentle not-yet mark when unsure).
+8. Every attempt that reached grounding appends one JSON line to `userData/actions.log` (mode 0600): time, label, approved, ok, code. No screenshots or other screen content.
+Stop (session end) cancels the pending confirm and also sets a flag checked right before the click, so an approval that races Stop still does not click; switching the setting off while the confirm is open also prevents it.
+
+`ALONGSIDE_ACTUATOR_DRYRUN=1` runs the whole flow but only logs the click (and skips the Accessibility requirement and the verification); the unit tests use injected fakes and dry-run, never a real click.
+
+### Actuator primitives (`src/main/actuator/index.ts`)
+
+One `Actuator` object (injected into the dispatcher and into AGENCY's policy engine) is the only way Alongside acts on the computer. It is a primitive layer: whether to act (settings, approvals, denylist, scam context, Stop) is decided by the callers. Every method returns `ActResult {ok, reason?: 'accessibility'|'blocked'|'dry-run'|'failed', detail?}`.
+
+| Method | Needs Accessibility | What it does / refuses |
+|---|---|---|
+| `openUrl(url)` | no | `shell.openExternal` for http/https only (localhost fine). Blocks credentials in the URL, `javascript:`/`file:`/`data:`/anything else, whitespace or control characters, over 2048 chars. |
+| `openApp(name)` | no | `open -a <name>` as an argument array (no shell). Names must be letters/digits/space/dot/dash, start with a letter or digit, at most 60 chars; Terminal, iTerm, Script Editor, Automator, Keychain Access and Warp are never opened for the learner. Invalid names are rejected, not silently cleaned. |
+| `revealPath(path)` | no | `shell.showItemInFolder` after an existence check; absolute or `~/` paths only. |
+| `openSettingsPane(pane)` | no | Fixed `x-apple.systempreferences:` deep links (screen, microphone, accessibility, privacy, displays, accessibility-display, sound, wifi, bluetooth, notifications, keyboard, general). |
+| `clickAt(p, {double?})` | yes | One left click (or two in one script for `double`) at a 0-1000 point mapped through the display bounds to points. |
+| `typeText(text)` | yes | At most 300 characters, no control characters (no newline or tab: Return and Tab are `pressKeys` decisions). The text is passed to osascript as an ARGUMENT after `--` and read as `item 1 of argv`, so it is never part of script source: quotes, backslashes, newlines and `do shell script` payloads are plain data (tested, and checked against real osascript argv handling). Logs carry the length only. |
+| `pressKeys(combo)` | yes | Allowlist: return, tab, escape, space, arrows, cmd+l/t/w/v/c/a/f (aliases enter, esc, command, uparrow...). Anything else (cmd+q, cmd+shift+4, cmd+tab, delete, function keys) is blocked. Each key maps to one fixed AppleScript statement. |
+| `scroll(p, dy)` | yes | 1-50 lines at the pointer position via a JXA scroll-wheel event; dy > 0 reads further down. |
+
+`status()` reports `{accessibility, dryRun}`; `canClick()` is true with Accessibility or in dry run. `ALONGSIDE_ACTUATOR_DRYRUN=1` validates, logs every call and performs nothing (`{ok:true, reason:'dry-run'}`); blocked input stays blocked in dry run. The generated scripts were compiled with `osacompile` (syntax only). Nothing was performed for real: Tier 2 needs the Accessibility permission (and the first `osascript` use may raise an Automation prompt for System Events), neither granted or tested here; the JXA scroll in particular has never run.
+
+**Unverified:** a real click has not been performed. It needs the macOS Accessibility permission for the app that runs `osascript`, and the first use may also raise a macOS "wants to control System Events" (Automation) prompt. Both are unverified until the user grants them; until then the tool answers `accessibility` and the assistant uses the ghost cursor.
+
 ## 9. Not verified
 
 - Behaviour on a second display or with a hot-plugged projector (the re-fit handler is wired but only the code path was exercised, not a real hot-plug).
 - Windows: none of this was run there.
+- Real clicking by the actuator (see 8b): Accessibility and Automation permissions not granted/tested.
 - A `display-metrics-changed` event was not produced on this machine; the handler is a plain `setBounds(primary.bounds)`.

@@ -15,7 +15,7 @@ import type {
   SkillId,
   SkillState,
 } from '../../shared/protocol'
-import { SKILL_IDS } from '../../shared/protocol'
+import { BUILTIN_SKILL_IDS, SKILL_IDS } from '../../shared/protocol'
 import type { LearnerStore, LevelDecision } from '../../shared/contracts'
 import type { Settings } from '../../shared/settings'
 import { DAY_MS, LEVEL_LABEL, clampLevel, createLevelEngine, evaluateAttempt as evaluate } from './levels'
@@ -30,7 +30,7 @@ const MAX_NOTE_CHARS = 160
 const MAX_LIST_ITEMS = 25
 
 type ListKey = 'about' | 'goals' | 'whatWorks' | 'jargon' | 'safety' | 'sharing'
-type MachineKey = 'skills' | 'confidence' | 'attempts' | 'lastSession'
+type MachineKey = 'skills' | 'confidence' | 'attempts' | 'lastSession' | 'doneForMe'
 type SectionKey = ListKey | MachineKey
 
 const CANONICAL: { key: SectionKey; heading: string; match: RegExp }[] = [
@@ -39,6 +39,7 @@ const CANONICAL: { key: SectionKey; heading: string; match: RegExp }[] = [
   { key: 'skills', heading: 'Skills', match: /^skills?\b/ },
   { key: 'confidence', heading: 'Confidence log', match: /^confidence/ },
   { key: 'attempts', heading: 'Attempt history', match: /^attempt/ },
+  { key: 'doneForMe', heading: 'Done for me', match: /^done for me/ },
   { key: 'whatWorks', heading: 'What works for me', match: /^what works/ },
   { key: 'jargon', heading: 'Jargon to avoid', match: /^jargon/ },
   { key: 'safety', heading: 'Safety notes', match: /^safety/ },
@@ -73,6 +74,8 @@ interface Model {
   confidence: ConfidencePoint[]
   attempts: AttemptRecord[]
   lastSession?: { at: number; skillId?: SkillId; summary: string }
+  // Things the assistant did on the learner's behalf (open_for_me / act_for_me), by skill or by what was done: dependency, shown honestly.
+  doneForMe: Record<string, number>
 }
 
 export function sha256(text: string): string {
@@ -289,6 +292,18 @@ function parseLastSession(section: RawSection | undefined, now: number): Model['
   return undefined
 }
 
+const DONE_RE = /^[-*]\s*(.+?)\s*[\u00b7|]\s*(\d{1,6})\s*$/
+const MAX_DONE_KEYS = 20
+
+function parseDoneForMe(section: RawSection | undefined): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const line of section?.lines ?? []) {
+    const m = DONE_RE.exec(line.trim())
+    if (m && Object.keys(out).length < MAX_DONE_KEYS) out[m[1]] = Number(m[2])
+  }
+  return out
+}
+
 function parseModel(md: string, now: number): Model {
   const { preamble, sections } = parseSections(md)
   const byKey = (k: SectionKey): RawSection | undefined => sections.find((s) => s.key === k)
@@ -301,11 +316,12 @@ function parseModel(md: string, now: number): Model {
     confidence: parseConfidence(byKey('confidence'), now),
     attempts: parseAttempts(byKey('attempts'), now),
     lastSession: parseLastSession(byKey('lastSession'), now),
+    doneForMe: parseDoneForMe(byKey('doneForMe')),
   }
 }
 
 function emptyModel(): Model {
-  return { preamble: [...PREAMBLE_DEFAULT], sections: [], skills: {}, extraSkillRows: [], confidence: [], attempts: [] }
+  return { preamble: [...PREAMBLE_DEFAULT], sections: [], skills: {}, extraSkillRows: [], confidence: [], attempts: [], doneForMe: {} }
 }
 
 // ---------- rendering ----------
@@ -334,6 +350,7 @@ function render(model: Model): string {
   for (const c of CANONICAL) {
     if (present.has(c.key)) continue
     if (c.key === 'lastSession' && !model.lastSession) continue
+    if (c.key === 'doneForMe' && Object.keys(model.doneForMe).length === 0) continue
     ordered.push({ key: c.key, heading: c.heading, lines: c.key === 'sharing' ? [...DEFAULT_SHARING] : [] })
   }
   for (const s of ordered) {
@@ -358,6 +375,9 @@ function render(model: Model): string {
         body = model.lastSession
           ? [`- ${formatDate(model.lastSession.at)} · ${model.lastSession.skillId ? SKILLS[model.lastSession.skillId].name : 'general'} · ${model.lastSession.summary}`]
           : []
+        break
+      case 'doneForMe':
+        body = Object.entries(model.doneForMe).map(([k, n]) => `- ${k} \u00b7 ${n}`)
         break
       default:
         body = s.lines
@@ -473,11 +493,13 @@ export class TeachingLearnerStore implements LearnerStore {
 
   snapshot(): LearnerSnapshot {
     const now = this.now()
-    const skills = {} as Record<SkillId, SkillState>
-    for (const id of SKILL_IDS) {
+    const skills = {} as LearnerSnapshot['skills']
+    for (const id of BUILTIN_SKILL_IDS) {
       const raw = this.model.skills[id] ?? this.engine.initial(now)
       skills[id] = this.engine.decay(raw, now)
     }
+    // The generic skill behind Argon-planned lessons only shows once it has been used.
+    if (this.model.skills.custom) skills.custom = this.engine.decay(this.model.skills.custom, now)
     return {
       skills,
       confidenceLog: this.model.confidence.map((c) => ({ ...c })),
@@ -485,6 +507,7 @@ export class TeachingLearnerStore implements LearnerStore {
       whatWorks: this.listItems('whatWorks'),
       avoidJargon: this.listItems('jargon').flatMap((t) => t.split(/\s*,\s*/)).filter(Boolean),
       lastSession: this.model.lastSession ? { ...this.model.lastSession } : undefined,
+      ...(Object.keys(this.model.doneForMe).length ? { doneForMe: { ...this.model.doneForMe } } : {}),
     }
   }
 
@@ -501,7 +524,7 @@ export class TeachingLearnerStore implements LearnerStore {
     await this.serial(async () => {
       await this.reloadFromDisk(false)
       if (this.model.attempts.some((a) => a.id === attempt.id)) return
-      const base = this.snapshot().skills[attempt.skillId]
+      const base = this.snapshot().skills[attempt.skillId] ?? this.engine.initial(attempt.endedAt)
       const settings = this.getSettings()
       const history = this.model.attempts.filter((a) => a.skillId === attempt.skillId)
       const decision =
@@ -527,6 +550,19 @@ export class TeachingLearnerStore implements LearnerStore {
       await this.persist()
     })
     return this.snapshot()
+  }
+
+  // Counts one thing the assistant did FOR the learner (key = skill id, `open:<host>` or `task:<goal>`), so the progress view can show dependency.
+  async recordDoneForMe(key: string): Promise<void> {
+    const clean = sanitizeNote(key)?.slice(0, 60).replace(/[\u00b7|]/g, ' ').trim()
+    if (!clean) return
+    await this.serial(async () => {
+      await this.reloadFromDisk(false)
+      const known = this.model.doneForMe
+      if (!(clean in known) && Object.keys(known).length >= MAX_DONE_KEYS) delete known[Object.keys(known)[0]]
+      known[clean] = (known[clean] ?? 0) + 1
+      await this.persist()
+    })
   }
 
   async addNote(note: string): Promise<void> {
@@ -623,13 +659,10 @@ export class TeachingLearnerStore implements LearnerStore {
     const snap = this.snapshot()
     const now = this.now()
     const name = this.aboutField('Preferred name')
-    const skills = SKILL_IDS.filter((id) => this.model.skills[id]).map((id) => ({
-      skillId: id,
-      name: SKILLS[id].name,
-      level: snap.skills[id].level,
-      levelLabel: LEVEL_LABEL[snap.skills[id].level],
-      lastPractised: snap.skills[id].lastSeen,
-    }))
+    const skills = SKILL_IDS.filter((id) => this.model.skills[id]).map((id) => {
+      const st = snap.skills[id] as SkillState
+      return { skillId: id, name: SKILLS[id].name, level: st.level, levelLabel: LEVEL_LABEL[st.level], lastPractised: st.lastSeen }
+    })
     const hints = snap.attempts.map((a) => a.hintsUsed)
     const avg = (xs: number[]): number | null => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null)
     const k = Math.min(3, Math.max(1, Math.floor(hints.length / 2)))

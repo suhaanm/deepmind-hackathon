@@ -1,5 +1,6 @@
 // Service interfaces. The DI bag is built in src/main/services.ts; every service has a mock
 // (ALONGSIDE_MOCK=1, or ALONGSIDE_MOCK_<NAME>=1 per service) so the pipeline runs from minute one.
+import type { FilesService } from './files'
 import type {
   AgentChip,
   AgentKind,
@@ -81,6 +82,8 @@ export interface LearnerStore {
   snapshot(): LearnerSnapshot
   recordAttempt(attempt: AttemptRecord): Promise<LearnerSnapshot>
   addNote(note: string): Promise<void>
+  // AGENCY calls this after open_for_me / act_for_me really did something for the learner (never for a dry run). Optional so test bags type-check.
+  recordDoneForMe?(key: string): Promise<void>
   // One editable markdown profile; a write needs the revision returned by the last read.
   editMarkdown(req: MarkdownEditRequest): Promise<MarkdownEditResult>
 }
@@ -140,6 +143,8 @@ export interface Services {
   runner: LessonRunner
   agents: AgentRuntime
   teaching: Teaching
+  // FILES (optional so partial test bags still type-check): the local files index. Reveal results via files.resolveIndexedPath.
+  files?: FilesService
 }
 
 export type ServiceName = keyof Services

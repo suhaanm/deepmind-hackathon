@@ -39,7 +39,9 @@ export function makeLearner(over: Partial<LearnerSnapshot> = {}): LearnerSnapsho
 export interface Fakes {
   deps: AgentDeps
   calls: string[]
-  groundReqs: { target: string; precise?: boolean; shotId?: string }[]
+  // Ordered record of what the user would see/hear: 'inject' and 'show:<annotation id>'.
+  timeline: string[]
+  groundReqs: { target: string; precise?: boolean; shotId?: string; hint?: string }[]
   chipsPatched: AgentChip[][]
   busEvents: AgentChip[]
   injected: { text: string; interrupt?: boolean }[]
@@ -50,7 +52,6 @@ export interface Fakes {
   set: {
     analyze?: (req: { text?: string; shot?: Shot; url?: string }, opts?: { onProgress?: (message: string) => void }) => Promise<ScamReport>
     ground?: (target: string) => Promise<GroundResult>
-    extract?: () => Promise<string>
     search?: () => Promise<GroundedAnswer>
     learner?: LearnerSnapshot
   }
@@ -62,6 +63,7 @@ export function makeFakes(settingsPatch: Partial<Settings> = {}): Fakes {
   const settings: Settings = { ...DEFAULT_SETTINGS, ...settingsPatch }
   const f: Fakes = {
     calls: [],
+    timeline: [],
     groundReqs: [],
     chipsPatched: [],
     busEvents: [],
@@ -84,9 +86,9 @@ export function makeFakes(settingsPatch: Partial<Settings> = {}): Fakes {
       },
     },
     grounder: {
-      ground: async ({ target, precise, shot }) => {
+      ground: async ({ target, precise, shot, hint }) => {
         f.calls.push(`grounder.ground:${target}`)
-        f.groundReqs.push({ target, precise, shotId: shot?.id })
+        f.groundReqs.push({ target, precise, shotId: shot?.id, hint })
         if (f.set.ground) return f.set.ground(target)
         boxN += 1
         return { found: true, box: { xmin: 100, ymin: 100 * boxN, xmax: 400, ymax: 100 * boxN + 40 }, confidence: 0.9, latencyMs: 5, model: 'fake' }
@@ -99,20 +101,24 @@ export function makeFakes(settingsPatch: Partial<Settings> = {}): Fakes {
       },
     },
     overlay: {
-      show: (a) => void f.shown.push(a),
+      show: (a) => {
+        f.shown.push(a)
+        for (const annotation of a) f.timeline.push(`show:${annotation.id}`)
+      },
       clear: (ids) => void f.cleared.push(ids),
     },
-    live: { inject: (text, opts) => void f.injected.push({ text, interrupt: opts?.interrupt }) },
+    live: {
+      inject: (text, opts) => {
+        f.injected.push({ text, interrupt: opts?.interrupt })
+        f.timeline.push('inject')
+      },
+    },
     learner: { snapshot: () => f.set.learner ?? makeLearner() },
     settings: () => f.settings,
     model: {
       searchAnswer: async () => {
         f.calls.push('model.searchAnswer')
         return f.set.search ? f.set.search() : { text: '1. Open Settings.\n2. Tap Display.', sources: ['support.example.com'] }
-      },
-      extractMessage: async () => {
-        f.calls.push('model.extractMessage')
-        return f.set.extract ? f.set.extract() : 'Your account will be closed in 24 hours. Please verify your PIN.'
       },
     },
     exportsDir: '/tmp/alongside-test/exports',

@@ -1,10 +1,10 @@
 # Third-party notices
 
-Alongside adapts a small amount of third-party code and design. Every adapted file carries a header comment (`// Adapted from <project> (<licence>) ...`) and appears once in the table below. The list is generated from `grep -rn "Adapted from" src apps scripts` plus the "Ported from" / "Port of" headers noted below.
+Alongside adapts a small amount of third-party code and design. Every adapted file carries a header comment (`// Adapted from <project> (<licence>) ...`) and appears once in the table below. The list below comes from `grep -rn "Adapted from" src apps scripts tools tests`.
 
 ## 1. farzaa/clicky and its Windows fork (MIT)
 
-Upstream: <https://github.com/farzaa/clicky> (Swift, macOS) and its Windows fork (C#). Both are MIT licensed. Alongside ported the *algorithm and animation* of the pointer flight and the arrow drawing to TypeScript and SVG; no Swift or C# code is included.
+Upstream: <https://github.com/farzaa/clicky> (Swift, macOS) and its Windows fork (C#). Both are MIT licensed. Alongside ported the *algorithms, animations and window recipe* (the bezier pointer flight, arrow and circle drawing, the pointing bubble, the click-through overlay window, screenshot sizing) to TypeScript and SVG, and the safety-policy and audit-log *rules* of its Hermes plugin (Python) to TypeScript; no Swift, C# or Python source is included.
 
 ```
 MIT License
@@ -40,22 +40,43 @@ Provided to builders by the hackathon guide. **That repository ships no LICENSE 
 
 ## 3. Adapted files
 
-| File in this repo | Adapted from | Upstream path | Licence | Header wording |
-|---|---|---|---|---|
-| `src/renderer/overlay/flight.ts` | farzaa/clicky and its Windows fork | `leanring-buddy/OverlayWindow.swift` (`animateBezierFlightArc`); Windows fork `FlyToSequence` | MIT | "Adapted from farzaa/clicky (MIT)" |
-| `src/renderer/overlay/annotations/GhostCursor.tsx` | farzaa/clicky | `leanring-buddy/OverlayWindow.swift` (`BlueCursorView` flight) | MIT | "Port of Clicky's BlueCursorView flight (... MIT, farzaa/clicky)" |
-| `src/renderer/overlay/arrow.ts` | farzaa/clicky Windows fork | `DrawingOverlayControl.cs` (`BuildArrowHead` head length and spread) | MIT | "Adapted in spirit from farzaa/clicky windows fork" |
-| `src/renderer/overlay/annotations/shapes.tsx` | farzaa/clicky Windows fork | `DrawingOverlayControl.cs` (circle and arrow rendering approach) | MIT | "Rendering approach for the Windows fork's circle/arrow ... is kept" |
-| `src/renderer/live/audio.ts` | google-gemini/gemini-live-api-examples | `frontend/mediaUtils.js`, `frontend/audio-processors/*.worklet.js` | none stated | "Adapted from google-gemini/gemini-live-api-examples" |
-| `src/renderer/live/connection.ts` | google-gemini/gemini-live-api-examples | `frontend/geminilive.js` | none stated | "Adapted from google-gemini/gemini-live-api-examples" |
-| `src/renderer/live/wire.ts` | google-gemini/gemini-live-api-examples | `gemini-live-ephemeral-tokens-websocket/frontend/geminilive.js` | none stated | "Adapted from google-gemini/gemini-live-api-examples" |
-| `src/renderer/live/LiveSession.ts` | google-gemini/gemini-live-api-examples | `frontend/geminilive.js`, `script.js`, `mediaUtils.js` | none stated | "Ported from google-gemini/gemini-live-api-examples" |
+Every file below starts with a header `// Adapted from <project> (<licence>) <upstream path>`. Regenerate this list with `grep -rn "Adapted from" src apps scripts tools tests` and check that the count matches.
 
-Files that only mention Clicky in a comment, as an explanation of a decision and with no code derived from it (`src/renderer/overlay/geometry.ts`), are not listed above.
+### From farzaa/clicky and its Windows fork (MIT)
+
+| File in this repo | Upstream path | What was adapted |
+|---|---|---|
+| `src/main/capture/index.ts` | `leanring-buddy/CompanionScreenCaptureUtility.swift` | Screen capture and JPEG sizing; own windows kept out of the shot |
+| `src/main/capture/sizing.ts` | `leanring-buddy/CompanionScreenCaptureUtility.swift` | Screenshot sizing and JPEG compression |
+| `src/main/capture/overlay-window.ts` | `leanring-buddy/OverlayWindow.swift` | Click-through, `screen-saver` level, all Spaces, over full-screen apps |
+| `src/renderer/overlay/flight.ts` | `leanring-buddy/OverlayWindow.swift` (`animateBezierFlightArc`); Windows fork `OverlayWindowManager.cs` (`FlyToSequence`) | Quadratic bezier arc, smoothstep ease, scale pulse, heading from the tangent; visit several points in order |
+| `src/renderer/overlay/annotations/GhostCursor.tsx` | `leanring-buddy/OverlayWindow.swift` (`BlueCursorView`) | Bezier flight, scale pulse, tangent heading, in SVG + `requestAnimationFrame` (visual only, never clicks) |
+| `src/renderer/overlay/annotations/labels.tsx` | `leanring-buddy/OverlayWindow.swift` | Pointing bubble: scale-bounce entrance, character-by-character typing |
+| `src/renderer/overlay/annotations/shapes.tsx` | Windows fork `DrawingOverlayControl.cs` | Circle and arrow drawing: glow, round caps, head polygon |
+| `src/renderer/overlay/arrow.ts` | Windows fork `DrawingOverlayControl.cs` (`BuildArrowHead`) | Arrow head length and spread |
+| `src/renderer/overlay/geometry.ts` | `leanring-buddy/CompanionManager.swift`, `CompanionScreenCaptureUtility.swift` | Screenshot pixel to screen point mapping (Clicky's double Y-flip deliberately removed) |
+| `src/main/agency/policy.ts` | `hermes-clicky-plugin/safety_policy.py`, `hermes-clicky-plugin/permission_policy.py` | Permission tiers (observe / point / confirm before action / scoped autopilot, mapped onto Alongside's `agency` setting) and the extra blocking words (destructive, payment, credential entry, permission prompt, send); rewritten in TypeScript with our own URL, app, file and rate-limit rules |
+| `src/main/agency/audit.ts` | `hermes-clicky-plugin/audit_log.py` | Append-only JSONL action log, redacted by default (no screen content, no typed text, no URL paths or queries) |
+
+### From google-gemini/gemini-live-api-examples (no LICENSE file upstream)
+
+All under `gemini-live-ephemeral-tokens-websocket/frontend/`.
+
+| File in this repo | Upstream path | What was adapted |
+|---|---|---|
+| `src/renderer/live/wire.ts` | `geminilive.js` | Message builders and the server-message parser, as a pure protocol layer |
+| `src/renderer/live/connection.ts` | `geminilive.js` | Socket setup and receive; resumption, `GoAway` handling and reconnect are our additions (the example has none) |
+| `src/renderer/live/LiveSession.ts` | `script.js`, `geminilive.js`, `mediaUtils.js` | Message handling, tool fan-out and session wiring, extended (compression, async tool dispatch, interruption flush, idle and goodbye endings) |
+| `src/renderer/live/audio.ts` | `mediaUtils.js` (`AudioStreamer`, `AudioPlayer`); `audio-processors/capture.worklet.js`, `playback.worklet.js` | Browser audio in and out; worklets inlined as Blob URLs |
+| `src/renderer/live/frames.ts` | `mediaUtils.js` (`BaseVideoCapture` 1 fps interval) | 1 fps frame sender, with change gating added |
+
+Original, not adapted: `src/renderer/live/tools.ts`, `types.ts`, `index.ts`, `src/renderer/dock/controller.ts`, `tests/live/*`, `spikes/live/*`.
+
+Files that only mention Clicky in a comment, as an explanation of a decision and with no code derived from it (for example `src/main/overlay-controller.ts`), are not listed above.
 
 ## 4. Ideas credited, no code taken
 
-- **Sentient OS** (AGPL-3.0): read only for ideas (act only after a fresh read; one editable Markdown profile where the user's edit wins; approval only by a real click). **No code, comments, prompts or structure were copied or translated from it.** Alongside's own code is therefore not subject to the AGPL.
+- **Sentient OS** (AGPL-3.0): read only for ideas (act only after a fresh read; one editable Markdown profile where the user's edit wins; approval only by a real click). **No code, comments, prompts or structure were copied or translated from it** (checked: `grep -ri sentient src` returns nothing). The act-for-me loop's discipline (mutate only after a fresh screen read, never auto-retry, success only when verified) is written in our own words. Alongside's own code is therefore not subject to the AGPL.
 - **HeyClicky, Copilot Vision, Gemini Live, Coco and others** were studied as prior art (see the README); nothing was taken from them.
 
 ## 5. npm dependencies

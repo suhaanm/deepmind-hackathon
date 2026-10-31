@@ -2,6 +2,7 @@
 // (structured output from Gemini, tool args from Live). Coordinates everywhere are
 // normalised 0-1000, origin top-left of the target display, x right, y down.
 import { z } from 'zod'
+import type { FilesSearchResult, FilesStatus } from './files'
 import type { Settings } from './settings'
 
 // ---------- ids ----------
@@ -19,7 +20,10 @@ export const HELP_LEVEL_LABELS: Record<HelpLevel, string> = {
   4: 'On my own',
 }
 
-export const SKILL_IDS = ['video_call', 'spot_scam', 'bigger_text'] as const
+// 'custom' is one generic skill for goals outside the three built-in lessons (Argon plans those from the live screen).
+export const SKILL_IDS = ['video_call', 'spot_scam', 'bigger_text', 'custom'] as const
+export const BUILTIN_SKILL_IDS = ['video_call', 'spot_scam', 'bigger_text'] as const
+export type BuiltinSkillId = (typeof BUILTIN_SKILL_IDS)[number]
 export const SkillIdSchema = z.enum(SKILL_IDS)
 export type SkillId = z.infer<typeof SkillIdSchema>
 
@@ -185,13 +189,16 @@ export interface ConfidencePoint {
 }
 
 export interface LearnerSnapshot {
-  skills: Record<SkillId, SkillState>
+  // The three built-in skills always exist; `custom` (one generic skill for Argon-planned lessons) appears after first use.
+  skills: Record<BuiltinSkillId, SkillState> & { custom?: SkillState }
   confidenceLog: ConfidencePoint[]
   // One entry per finished attempt; drives the hints-per-task chart.
   attempts: AttemptRecord[]
   whatWorks: string[]
   avoidJargon: string[]
   lastSession?: { at: number; skillId?: SkillId; summary: string }
+  // AGENCY: how many times the assistant did something FOR the learner, per skill id or goal key; the progress view shows it honestly.
+  doneForMe?: Record<string, number>
 }
 
 export interface MarkdownEditRequest {
@@ -273,6 +280,8 @@ export interface CompanionState {
   lastError?: string
   // Set while ask_user_confirm waits; cleared only by a real click (IPC confirm:answer).
   pendingConfirm?: ConfirmRequest
+  // FILES: indexing progress and counts for the "Files I can look at" section.
+  files?: FilesStatus
 }
 
 // State fields a renderer may patch over IPC (everything else is main-owned).
@@ -323,6 +332,10 @@ export const LIVE_TOOL_NAMES = [
   'update_profile',
   'end_lesson',
   'clear_annotations',
+  'do_it_for_me',
+  'open_for_me',
+  'act_for_me',
+  'search_files',
 ] as const
 export const LiveToolNameSchema = z.enum(LIVE_TOOL_NAMES)
 export type LiveToolName = z.infer<typeof LiveToolNameSchema>
@@ -343,6 +356,14 @@ export const ToolArgSchemas = {
     confidence: z.number().int().min(1).max(5).optional(),
   }),
   clear_annotations: z.object({}),
+  // Opt-in (settings.doItForMeAllowed, default off): one real click at one grounded target, after a real-click confirmation.
+  do_it_for_me: z.object({ target: z.string().min(1) }),
+  // AGENCY (settings.agency, default off): open a website/app/file/settings pane after a real-click confirmation; no screenshot, no Accessibility.
+  open_for_me: z.object({ kind: z.enum(['url', 'app', 'file', 'settings']), value: z.string().min(1).max(2000) }),
+  // AGENCY: a short multi-step task (<= 8 actions), each shown on screen and confirmed per settings.agency; Stop ends it at once.
+  act_for_me: z.object({ goal: z.string().min(1).max(500) }),
+  // FILES (settings.filesEnabled, default off): search the local index of folders the learner chose; <= 3 short snippets, never a path to read.
+  search_files: z.object({ query: z.string().min(1).max(300), k: z.number().int().min(1).max(3).optional() }),
 } as const satisfies Record<LiveToolName, z.ZodType>
 
 export type ToolArgs<N extends LiveToolName> = z.infer<(typeof ToolArgSchemas)[N]>
@@ -351,6 +372,59 @@ export interface StepDoneResult {
   ok: boolean
   done: boolean
   step?: { index: number; instruction: string }
+}
+
+export type DoItForMeCode =
+  | 'setting_off' // the learner has not switched "do it for me" on
+  | 'sensitive' // money, passwords, sending, deleting, permissions: always left to the learner
+  | 'safety_step' // the current lesson step is safety-critical
+  | 'scam_check' // a scam check is running
+  | 'not_found'
+  | 'accessibility' // macOS Accessibility permission missing: show instead of click
+  | 'declined' // the learner said no (or never answered)
+  | 'stopped' // Stop was pressed
+  | 'click_failed'
+  | 'clicked'
+
+// allowed:false = the assistant must not click and should teach / show instead. done = exactly one click was performed
+// (or only logged when ALONGSIDE_ACTUATOR_DRYRUN=1).
+export interface DoItForMeResult {
+  allowed: boolean
+  done: boolean
+  code: DoItForMeCode
+  reason: string
+  label?: string
+  verified?: boolean
+  dryRun?: boolean
+}
+
+export type AgencyCode =
+  | 'agency_off' // settings.agency is off: teach instead
+  | 'blocked' // the policy refused (denylist, URL rules, secure field): show instead
+  | 'safety_step' // the current lesson step is safety-critical
+  | 'scam_check' // a scam check is running
+  | 'invalid' // the value could not be used (bad URL, unknown app)
+  | 'not_found'
+  | 'accessibility' // click/type/keys need macOS Accessibility: guide instead
+  | 'declined' // the learner said no (or never answered)
+  | 'stopped' // Stop was pressed
+  | 'rate_limited'
+  | 'busy' // another act_for_me is running
+  | 'failed'
+  | 'done'
+  | 'gave_up' // the loop could not finish within its limits; nothing was retried
+  | 'unavailable' // the agentic loop is not switched on in this build
+
+// allowed:false = the assistant must not act and should teach / show instead. done = the task finished (or, for a dry run, was only logged).
+export interface AgencyResult {
+  allowed: boolean
+  done: boolean
+  code: AgencyCode
+  reason: string
+  label?: string
+  steps?: number
+  verified?: boolean
+  dryRun?: boolean
 }
 
 export interface ToolResultMap {
@@ -364,6 +438,10 @@ export interface ToolResultMap {
   update_profile: { ok: boolean }
   end_lesson: { ok: boolean }
   clear_annotations: { ok: boolean }
+  do_it_for_me: DoItForMeResult
+  open_for_me: AgencyResult
+  act_for_me: AgencyResult
+  search_files: FilesSearchResult
 }
 
 export interface ToolError {

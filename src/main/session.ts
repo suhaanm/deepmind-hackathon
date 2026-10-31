@@ -25,8 +25,8 @@ export function registerSession(ctx: ServiceContext, s: Services, confirm: Confi
   })
 
   bus.on('session:ended', ({ reason }) => {
+    confirm.cancel() // always: a pending ask/act_for_me confirmation must not outlive Stop, whatever the phase
     if (!ACTIVE.has(state.get().phase) && state.get().phase !== 'error') return
-    confirm.cancel()
     void s.runner.abort(`session ended: ${reason}`)
     s.overlay.clear()
     state.patch({ phase: reason === 'error' ? 'error' : restingPhase(), skill: undefined })

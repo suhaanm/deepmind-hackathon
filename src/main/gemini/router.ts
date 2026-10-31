@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import type { Router } from '../../shared/contracts'
 import { RouteDecisionSchema, SKILL_IDS, type RouteDecision } from '../../shared/protocol'
-import { callModel, clamp01, jsonFormat, parseModelJson, type GeminiDeps } from './client'
+import { callModel, clamp01, GeminiError, jsonFormat, parseModelJson, withSafeLog, type GeminiDeps } from './client'
 import { INJECTION_GUARD } from './prompts'
 
 export interface RouterConfig {
@@ -26,9 +26,9 @@ const ROUTE_SCHEMA = {
       type: 'string',
       enum: ['lesson', 'point', 'scam_check', 'settings', 'stop', 'chitchat', 'unknown'],
       description:
-        'lesson = wants to learn or be guided through a multi-step task; point = asks where one thing is or to be shown one thing on the screen; scam_check = asks whether a message, email, call or link is genuine or a scam; settings = wants to change how the assistant behaves (speak slower, captions, bigger arrows); stop = wants it to stop, cancel, be quiet or says goodbye; chitchat = greeting, thanks, small talk; unknown = unclear or off-topic',
+        'lesson = wants to learn or be guided through a multi-step task; point = asks where one thing is or to be shown one thing on the screen; scam_check = asks whether a message, email, call or link is genuine or a scam; settings = wants to change how THE ASSISTANT itself behaves (speak slower, captions on, bigger arrows) - NOT the text size or settings of their own computer, which is a lesson; stop = wants it to stop, cancel, be quiet or says goodbye; chitchat = greeting, thanks, small talk; unknown = unclear or off-topic',
     },
-    skillId: { type: 'string', enum: [...SKILL_IDS], description: 'Only for lesson/scam_check: video_call, spot_scam or bigger_text if clearly one of them; else omit' },
+    skillId: { type: 'string', enum: [...SKILL_IDS], description: 'Only for lesson/scam_check: video_call, spot_scam or bigger_text (making text on their computer larger) if clearly one of them; else omit' },
     goal: { type: 'string', description: 'Only for lesson/point/scam_check: the learner goal or target as a short plain phrase' },
     confidence: { type: 'number', description: '0 to 1' },
   },
@@ -53,7 +53,8 @@ export function heuristicRoute(utterance: string): RouteDecision {
   return { intent: 'unknown', confidence: 0.2 }
 }
 
-export function createRouter(deps: GeminiDeps, config: RouterConfig = {}): Router {
+export function createRouter(rawDeps: GeminiDeps, config: RouterConfig = {}): Router {
+  const deps = withSafeLog(rawDeps)
   const timeoutMs = config.timeoutMs ?? 4000
   return {
     async classify(utterance) {
@@ -90,7 +91,7 @@ export function createRouter(deps: GeminiDeps, config: RouterConfig = {}): Route
         }
         return RouteDecisionSchema.parse(decision)
       } catch (e) {
-        deps.log('router', `model route failed (${e instanceof Error ? e.message : String(e)}); using keyword fallback`)
+        deps.log('router', `model route failed (${e instanceof GeminiError ? e.code : 'error'}); using keyword fallback`)
         return heuristicRoute(text)
       }
     },

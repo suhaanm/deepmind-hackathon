@@ -4,6 +4,8 @@
 # (set ALONGSIDE_LOCK_WAIT=<seconds> to wait instead). Kills the command (whole process group)
 # after ALONGSIDE_LOCK_MAX_SECONDS (default 300) and exits 124.
 set -u
+# Agent/test runs only: the (unauthenticated) debug HTTP server is opt-in via ALONGSIDE_DEBUG=1 (see src/main/index.ts).
+export ALONGSIDE_DEBUG=1
 LOCK=/tmp/alongside-electron.lock
 MAX=${ALONGSIDE_LOCK_MAX_SECONDS:-300}
 WAIT=${ALONGSIDE_LOCK_WAIT:-0}

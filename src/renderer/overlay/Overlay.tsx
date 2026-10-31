@@ -5,6 +5,7 @@ import { PERSONAS } from '../../shared/personas'
 import type { OverlayCommand } from '../../shared/protocol'
 import { DEFAULT_SETTINGS, type Settings } from '../../shared/settings'
 import { annotationStyle } from '../design/annotation-style'
+import { Roadmap } from './annotations/Roadmap'
 import { OverlayScene } from './OverlayScene'
 import { advance, EMPTY_OVERLAY_STATE, nextDeadline, reduceOverlay, type OverlayState } from './store'
 
@@ -61,12 +62,15 @@ export function Overlay(): ReactElement {
 
   const persona = settings.persona ? PERSONAS[settings.persona] : null
   return (
-    <OverlayScene
-      state={state}
-      viewport={viewport}
-      style={style}
-      captionsEnabled={settings.captions}
-      speakerNames={{ user: 'You', assistant: persona?.displayName ?? 'Assistant' }}
-    />
+    <>
+      <OverlayScene
+        state={state}
+        viewport={viewport}
+        style={style}
+        captionsEnabled={settings.captions}
+        speakerNames={{ user: 'You', assistant: persona?.displayName ?? 'Assistant' }}
+      />
+      <Roadmap reducedMotion={reducedMotion} />
+    </>
   )
 }

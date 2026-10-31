@@ -8,6 +8,8 @@ export const MODELS = {
   // Text-only output, no Live API. No temperature/top_p/top_k: use thinking_level.
   argon: env.MODEL_ARGON || 'gemini-4-argon',
   transcribe: env.MODEL_TRANSCRIBE || 'gemini-3.5-transcribe-live',
+  // Embeddings for the files index (verified: gemini-embedding-2 and gemini-embedding-001 both answer embedContent on our key).
+  embed: env.MODEL_EMBED || 'gemini-embedding-2',
 } as const
 
 export type ModelKey = keyof typeof MODELS

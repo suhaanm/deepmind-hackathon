@@ -420,6 +420,23 @@ describe('notes, forgetting and the profile lists', () => {
     expect(snap.lastSession).toBeUndefined()
   })
 
+  it('counts what the assistant did for the learner, persists it in "Done for me", and survives a reload', async () => {
+    const store = make()
+    await store.load()
+    expect(store.snapshot().doneForMe).toBeUndefined()
+    await store.recordDoneForMe('open:www.ageuk.org.uk')
+    await store.recordDoneForMe('open:www.ageuk.org.uk')
+    await store.recordDoneForMe('task:find the opening times')
+    await store.recordDoneForMe('   ')
+    expect(store.snapshot().doneForMe).toEqual({ 'open:www.ageuk.org.uk': 2, 'task:find the opening times': 1 })
+    const text = fs.readFileSync(path.join(dir, PROFILE_FILE), 'utf8')
+    expect(text).toContain('## Done for me')
+    expect(text).toContain('- open:www.ageuk.org.uk · 2')
+    expect((await make().load()).doneForMe).toEqual({ 'open:www.ageuk.org.uk': 2, 'task:find the opening times': 1 })
+    await store.forgetAll()
+    expect((await make().load()).doneForMe).toBeUndefined()
+  })
+
   it('seeds a skill for the demo without touching anything else', async () => {
     const store = make()
     await store.setSkillLevel('video_call', 2, { lastSeen: T0 - DAY_MS })

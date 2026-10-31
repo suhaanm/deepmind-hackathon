@@ -5,7 +5,7 @@
 // idle/goodbye endings, change-gated 1 fps frames and phase detection. See THIRD_PARTY_NOTICES.md.
 import { LiveConnection } from './connection'
 import { FrameLoop, type FrameSample } from './frames'
-import { isBlockingTool, LIVE_TOOLS, schedulingFor } from './tools'
+import { LIVE_TOOLS, schedulingFor, toolTimeoutMs } from './tools'
 import type {
   AudioInput,
   AudioOutput,
@@ -52,14 +52,32 @@ export interface StartOptions {
   // Called once the socket is open; returns the spotter's pre-roll. When it yields audio, the chunks buffered by our own
   // mic during connect are dropped (the spotter kept capturing the same period, so sending both would repeat the tail).
   takePreRoll?: () => string[] | null
+  // Chat session: never open the microphone, and do not play the model's voice (its words arrive as transcripts).
+  textOnly?: boolean
+  // Keep the session alive when the microphone cannot be opened (permission denied, no device); typing still works.
+  micOptional?: boolean
 }
 
 type Handler<K extends LiveEventName> = (payload: LiveSessionEvents[K]) => void
 
 const DEFAULT_GOODBYE = /\b(good ?bye|bye bye|bye for now|stop listening|see you (later|soon))\b/i
 const NOISE_FLOOR = 0.015
-const TOOL_TIMEOUT_MS = 45_000
-const CONFIRM_TIMEOUT_MS = 5 * 60_000
+// START low: room noise and the odd cough should not open a turn (measured: same latency, speech still caught). END is left at
+// the server default: END_SENSITIVITY_LOW made the server wait so long that one question went unanswered for 15 s.
+const DEFAULT_VAD: VadConfig = { startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' }
+const BARGE_IN_LEVEL = 0.25
+const ECHO_WINDOW_MS = 40_000
+const IDLE_GRACE_MS = 8000
+const STOPWORDS = new Set(['the', 'and', 'you', 'your', 'for', 'are', 'with', 'that', 'this', 'have', 'can', 'will', 'let', 'how', 'what', 'its', 'but', 'not', 'all', 'now', 'out', 'was', 'when', 'then', 'there', 'here'])
+
+// Lower-case words of 3+ letters minus filler: what we compare to spot the model's own voice in the mic transcript.
+function contentWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]+/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w))
+}
 const MAX_PENDING_AUDIO = 100 // ~3 s of 32 ms chunks buffered while the socket is still opening
 
 export class LiveSession {
@@ -81,6 +99,14 @@ export class LiveSession {
   private outBuf = ''
   private lastVoiceAt = 0
   private inLevel = 0
+  // Echo guard: what the model said recently (to recognise its own voice coming back through the mic) and half-duplex state.
+  private recentModel: Array<{ at: number; words: Set<string> }> = []
+  private halfDuplex = false
+  private textMode = false
+  private micOpen = false
+  private micTailUntil = 0
+  private echoTurn = false
+  private heldInput = ''
   private triggerAt: { at: number; kind: 'voice' | 'text' } | null = null
   private ttfaReported = true
   private lastActivityAt = Date.now()
@@ -98,6 +124,7 @@ export class LiveSession {
   constructor(opts: LiveSessionOptions) {
     this.opts = opts
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 20_000
+    this.halfDuplex = opts.duplex === 'half'
     this.log = opts.log ?? (() => undefined)
   }
 
@@ -117,6 +144,7 @@ export class LiveSession {
     const t0 = Date.now()
     try {
       const [systemInstruction] = await Promise.all([this.opts.host.systemInstruction(), this.opts.audioOut.init()])
+      if (this.stopped) return // Stop pressed while connecting: do not open a socket or the mic
       this.offIdle = this.opts.audioOut.onIdle(() => this.onPlaybackIdle())
       this.conn = new LiveConnection({
         getAuth: () => this.opts.host.getAuth(),
@@ -127,7 +155,7 @@ export class LiveSession {
             systemInstruction,
             tools: this.opts.tools ?? LIVE_TOOLS,
             resumptionHandle: handle,
-            vad: this.opts.vad,
+            vad: this.opts.vad ?? DEFAULT_VAD,
           }),
         onEvent: (e) => this.onServerEvent(e),
         onReconnecting: () => {
@@ -152,9 +180,11 @@ export class LiveSession {
         log: this.log,
       })
       // Mic starts while the socket is opening; chunks are buffered so the learner's first words are not lost.
-      const micReady = this.opts.audioIn.start((b64, level) => this.onMicChunk(b64, level))
+      this.textMode = start.textOnly === true
+      const micReady = this.textMode ? Promise.resolve() : this.startMic(start.micOptional === true)
       const connected = this.conn.connect()
       await Promise.all([micReady, connected])
+      if (this.stopped) return
       this.connected = true
       this.emit('metrics', { kind: 'setup', ms: Date.now() - t0 })
       this.lastActivityAt = Date.now()
@@ -168,6 +198,8 @@ export class LiveSession {
       this.startFrames()
       this.idleTimer = setInterval(() => this.checkIdle(), 1000)
     } catch (err) {
+      // A user stop closes the socket under us; that is not a failure.
+      if (this.stopped) return
       const message = err instanceof Error ? err.message : String(err)
       this.emit('error', { message, fatal: true })
       await this.stop('error')
@@ -199,6 +231,47 @@ export class LiveSession {
     this.phase = 'ended'
     this.emitState()
     this.emit('ended', { reason })
+  }
+
+  private async startMic(optional: boolean): Promise<void> {
+    try {
+      await this.opts.audioIn.start((b64, level) => this.onMicChunk(b64, level))
+      this.micOpen = true
+    } catch (err) {
+      if (!optional) throw err
+      this.emit('notice', { kind: 'mic_unavailable', message: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  // Text mode (chat): the microphone is released and the model's voice is not played; replies still arrive as transcripts.
+  // Switching back to voice reopens the microphone (silently keeps text mode if that fails).
+  async setTextMode(on: boolean): Promise<void> {
+    if (on === this.textMode || this.stopped) return
+    this.textMode = on
+    if (on) {
+      this.opts.audioOut.flush()
+      this.conn?.send(msg.audioStreamEnd())
+      if (this.micOpen) {
+        this.opts.audioIn.stop()
+        this.micOpen = false
+      }
+      this.recomputePhase()
+    } else if (!this.micOpen) {
+      await this.startMic(true)
+      if (!this.micOpen) this.textMode = true
+    }
+  }
+
+  get isTextMode(): boolean {
+    return this.textMode
+  }
+
+  // A typed learner turn: answered like speech, cutting in if the model is mid-sentence. Counts as learner activity.
+  sendUserText(text: string): boolean {
+    if (!this.connected || this.stopped || !text.trim()) return false
+    this.sendInject(text)
+    this.markUserTurn() // shows "thinking" until the reply starts, and counts as learner activity
+    return true
   }
 
   setMicMuted(muted: boolean): void {
@@ -253,21 +326,18 @@ export class LiveSession {
         this.onModelAudio(e.base64)
         break
       case 'inputTranscription':
-        if (e.text) {
-          this.inBuf += e.text
-          this.markUserTurn()
-          this.emit('transcript', { role: 'user', text: this.inBuf, final: false })
-        }
+        if (e.text) this.onUserTranscript(e.text)
         if (e.finished) this.finalizeInput()
         break
       case 'interimInputTranscription':
-        this.markUserTurn()
+        // Interim hypotheses can be the model's own voice too; only a full transcript chunk counts as the learner speaking.
         break
       case 'outputTranscription':
         // A model reply started: the user's utterance is complete.
         this.finalizeInput()
         if (e.text) {
           this.outBuf += e.text
+          this.noteModelWords(e.text)
           this.emit('transcript', { role: 'assistant', text: this.outBuf, final: false })
         }
         if (e.finished) this.finalizeOutput()
@@ -288,13 +358,17 @@ export class LiveSession {
         break
       case 'voiceActivity':
         if (e.activity === 'start') {
-          this.markUserTurn()
           // Barge-in: stop talking the instant the server hears the learner, ahead of its `interrupted` message.
           if (this.generating || this.opts.audioOut.isPlaying()) this.opts.audioOut.flush()
         }
         break
       case 'generationComplete':
         this.generating = false
+        // Nothing is played in text mode, so the reply is complete now (turnComplete trails by the length of the unplayed speech).
+        if (this.textMode) {
+          this.finalizeInput()
+          this.finalizeOutput()
+        }
         this.recomputePhase()
         break
       case 'turnComplete':
@@ -306,7 +380,6 @@ export class LiveSession {
         this.onTurnEnded()
         break
       case 'toolCall':
-        this.lastActivityAt = Date.now()
         for (const call of e.calls) this.dispatchTool(call)
         this.recomputePhase()
         break
@@ -330,7 +403,6 @@ export class LiveSession {
   }
 
   private onModelAudio(b64: string): void {
-    this.lastActivityAt = Date.now()
     if (!this.generating) {
       this.generating = true
       if (!this.ttfaReported && this.triggerAt) {
@@ -339,11 +411,12 @@ export class LiveSession {
       }
     }
     this.userTurnOpen = false
-    this.opts.audioOut.play(b64)
+    if (!this.textMode) this.opts.audioOut.play(b64)
     this.recomputePhase()
   }
 
   private onPlaybackIdle(): void {
+    this.micTailUntil = Date.now() + 700
     this.recomputePhase()
     this.onTurnEnded()
   }
@@ -373,8 +446,7 @@ export class LiveSession {
       let error: string | undefined
       try {
         if (!this.opts.toolHandler) throw new Error('no tool handler registered')
-        const limit = isBlockingTool(call.name) ? CONFIRM_TIMEOUT_MS : TOOL_TIMEOUT_MS
-        result = await withTimeout(this.opts.toolHandler(req, ac.signal), limit, ac.signal)
+        result = await withTimeout(this.opts.toolHandler(req, ac.signal), toolTimeoutMs(call.name), ac.signal)
       } catch (err) {
         error = err instanceof Error ? err.message : String(err)
         result = { error }
@@ -394,17 +466,16 @@ export class LiveSession {
     const fr: FunctionResponse = { id: call.id, name: call.name, response }
     const scheduling = schedulingFor(call.name, result)
     if (scheduling) fr.scheduling = scheduling
-    this.lastActivityAt = Date.now()
     this.conn?.send(msg.toolResponse([fr]))
   }
 
   // ---------- audio / frames ----------
   private onMicChunk(b64: string, level: number): void {
-    if (this.stopped || this.micMuted) return
+    if (this.stopped || this.micMuted || this.textMode) return
     this.inLevel = Math.max(Math.min(1, level * 4), this.inLevel * 0.85)
     if (level > NOISE_FLOOR) {
+      // Raw mic level is only for latency metrics: room noise must not keep a session (and screen reading) alive forever.
       this.lastVoiceAt = Date.now()
-      this.lastActivityAt = this.lastVoiceAt
       this.triggerAt = { at: this.lastVoiceAt, kind: 'voice' }
       this.ttfaReported = false
     }
@@ -413,7 +484,9 @@ export class LiveSession {
       if (this.pendingAudio.length > MAX_PENDING_AUDIO) this.pendingAudio.shift()
       return
     }
-    if (this.opts.duplex === 'half' && (this.generating || this.opts.audioOut.isPlaying())) return
+    // Half duplex: while the model speaks (and for a moment after) the mic is not uploaded, so it cannot hear itself. A shout
+    // still gets through, so "stop!" works.
+    if (this.halfDuplex && level < BARGE_IN_LEVEL && (this.generating || this.opts.audioOut.isPlaying() || Date.now() < this.micTailUntil)) return
     this.conn?.send(msg.audio(b64))
   }
 
@@ -453,6 +526,56 @@ export class LiveSession {
   }
 
   // ---------- transcripts / phase ----------
+  private noteModelWords(text: string): void {
+    const words = contentWords(text)
+    if (!words.length) return
+    this.recentModel.push({ at: Date.now(), words: new Set(words) })
+    const cutoff = Date.now() - ECHO_WINDOW_MS
+    while (this.recentModel.length && this.recentModel[0]!.at < cutoff) this.recentModel.shift()
+  }
+
+  private modelSpokeRecently(): boolean {
+    return this.generating || this.opts.audioOut.isPlaying() || (this.recentModel.length > 0 && Date.now() - this.recentModel[this.recentModel.length - 1]!.at < ECHO_WINDOW_MS)
+  }
+
+  // True when most of what the "learner" said was just said by the model: its own voice came back through the microphone.
+  private isEcho(text: string): boolean {
+    if (!this.modelSpokeRecently()) return false
+    const words = contentWords(text)
+    if (words.length < 2) return false
+    const cutoff = Date.now() - ECHO_WINDOW_MS
+    const known = new Set<string>()
+    for (const m of this.recentModel) if (m.at >= cutoff) for (const w of m.words) known.add(w)
+    let hits = 0
+    for (const w of words) if (known.has(w)) hits++
+    return hits / words.length >= 0.7
+  }
+
+  private onUserTranscript(text: string): void {
+    if (this.echoTurn) return
+    const candidate = this.inBuf + this.heldInput + text
+    if (this.isEcho(candidate)) {
+      this.echoTurn = true
+      this.inBuf = ''
+      this.heldInput = ''
+      if (!this.halfDuplex) {
+        // Speakers + open mic: stop uploading the mic while the model talks. Loses barge-in, ends the loop.
+        this.halfDuplex = true
+        this.emit('notice', { kind: 'echo_guard', message: 'The assistant heard its own voice; microphone is muted while it speaks.' })
+      }
+      return
+    }
+    // While the model is (or was just) speaking, hold short fragments until there is enough to tell the learner from an echo.
+    if (this.modelSpokeRecently() && contentWords(candidate).length < 3 && !this.userTurnOpen) {
+      this.heldInput += text
+      return
+    }
+    this.inBuf += this.heldInput + text
+    this.heldInput = ''
+    this.markUserTurn()
+    this.emit('transcript', { role: 'user', text: this.inBuf, final: false })
+  }
+
   private markUserTurn(): void {
     this.userTurnOpen = true
     this.lastActivityAt = Date.now()
@@ -466,6 +589,21 @@ export class LiveSession {
   }
 
   private finalizeInput(): void {
+    const wasEcho = this.echoTurn
+    this.echoTurn = false
+    if (wasEcho) {
+      this.heldInput = ''
+      return
+    }
+    if (this.heldInput && !this.inBuf) {
+      // A short fragment (one or two words) that never grew: the learner if the model is quiet, else its echo.
+      if (this.generating || this.opts.audioOut.isPlaying()) this.heldInput = ''
+      else {
+        this.inBuf = this.heldInput
+        this.heldInput = ''
+        this.markUserTurn()
+      }
+    }
     if (!this.inBuf) return
     const text = this.inBuf
     this.inBuf = ''
@@ -510,10 +648,16 @@ export class LiveSession {
     this.emit('state', { phase: this.phase, connected: this.connected, reconnecting: this.reconnecting })
   }
 
+  // Idle = no learner speech and no stage direction for idleTimeoutMs. Model output, tool replies and screen frames never count,
+  // so a model that talks to itself (echo, room noise) cannot keep a session, and the screen reading, alive.
   private checkIdle(): void {
-    if (this.stopped || this.idleTimeoutMs <= 0 || this.phase !== 'live' || this.micMuted) return
+    if (this.stopped || this.idleTimeoutMs <= 0 || this.micMuted || this.reconnecting) return
     if (this.inflight.size > 0 || this.injectQueue.length) return
-    if (Date.now() - this.lastActivityAt >= this.idleTimeoutMs) void this.stop('idle')
+    const quiet = Date.now() - this.lastActivityAt
+    if (quiet < this.idleTimeoutMs) return
+    // Let a sentence in progress finish, but not for long.
+    if ((this.generating || this.opts.audioOut.isPlaying()) && quiet < this.idleTimeoutMs + IDLE_GRACE_MS) return
+    void this.stop('idle')
   }
 
   private emit<K extends LiveEventName>(event: K, payload: LiveSessionEvents[K]): void {

@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ANNOTATION_TONES, annotationStyle } from './annotation-style'
-import { contrastRatio, parseHex, resolveTheme, type ThemeKey, type TokenMap } from './contrast'
+import { GLASS_CARD_FLOOR, GLASS_SHELL_FLOOR, glassAlphas } from './apply-settings'
+import { blend, contrastRatio, parseGlassMix, parseHex, resolveTheme, type ThemeKey, type TokenMap } from './contrast'
 
 const css = readFileSync(join(__dirname, 'tokens.css'), 'utf8')
 
@@ -155,4 +156,47 @@ describe('annotation style', () => {
     expect(s.pulse.enabled).toBe(false)
     expect(s.ghostCursor.press.durationMs).toBe(0)
   })
+})
+
+describe('glass', () => {
+  it('maps the opacity setting into safe alphas', () => {
+    expect(glassAlphas(0.35).shell).toBeCloseTo(GLASS_SHELL_FLOOR, 5)
+    expect(glassAlphas(1).shell).toBeCloseTo(1, 5)
+    expect(glassAlphas(0.01).shell).toBeCloseTo(GLASS_SHELL_FLOOR, 5)
+    expect(glassAlphas(0.35).card).toBeGreaterThanOrEqual(GLASS_CARD_FLOOR)
+    expect(glassAlphas(0.78).shell).toBeGreaterThan(glassAlphas(0.5).shell)
+  })
+
+  for (const dark of [false, true]) {
+    it(`${dark ? 'dark' : 'light'}: text stays readable over the worst desktops (pure black and pure white)`, () => {
+      const t = resolveTheme(css, { dark, highContrast: false, glass: true })
+      const layer = (token: string): { hex: string; alpha: number } => {
+        const m = parseGlassMix(t[token]!)
+        if (!m) throw new Error(`${token} is not a glass mix: ${t[token]}`)
+        return { hex: m.hex, alpha: m.layer === 'shell' ? GLASS_SHELL_FLOOR : GLASS_CARD_FLOOR }
+      }
+      const failures: string[] = []
+      for (const backdrop of ['#000000', '#ffffff']) {
+        const paint = (token: string): string => {
+          const l = layer(token)
+          return blend(l.hex, l.alpha, backdrop)
+        }
+        const check = (fg: string, bgToken: string, min: number): void => {
+          const ratio = contrastRatio(t[`--${fg}`]!, paint(`--${bgToken}`))
+          if (ratio < min) failures.push(`${fg} on ${bgToken} over ${backdrop} = ${ratio.toFixed(2)} (needs ${min})`)
+        }
+        for (const bg of ['bg', 'surface']) {
+          check('ink', bg, 4.5)
+          check('ink-muted', bg, 4.5)
+          check('ink-subtle', bg, 4.5)
+        }
+        for (const bg of ['surface-raised', 'surface-sunken']) {
+          check('ink', bg, 4.5)
+          check('ink-muted', bg, 4.5)
+          check('ink-subtle', bg, 4.5)
+        }
+      }
+      expect(failures).toEqual([])
+    })
+  }
 })

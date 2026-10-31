@@ -21,6 +21,20 @@ describe('requestKey', () => {
   })
 })
 
+describe('Request-object calls (what the Google SDK sends)', () => {
+  it('keys on the body inside a Request, so different prompts get different keys', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'replay-test-'))
+    const fake = (async () => new Response('{"steps":[]}', { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch
+    const rec = createReplayFetch({ dir, mode: 'record', realFetch: fake })
+    await rec.fetch(new Request(URL_, { method: 'POST', body: body('Start call button', BIG) }))
+    await rec.fetch(new Request(URL_, { method: 'POST', body: body('Join button', BIG) }))
+    expect(fs.readdirSync(dir)).toHaveLength(2)
+    const offline = createReplayFetch({ dir, mode: 'replay', realFetch: fake })
+    expect((await offline.fetch(new Request(URL_, { method: 'POST', body: body('Join button', 'D'.repeat(6000)) }))).status).toBe(200)
+    await expect(offline.fetch(new Request(URL_, { method: 'POST', body: body('Other', BIG) }))).rejects.toThrow('fetch failed')
+  })
+})
+
 describe('record then replay', () => {
   it('records a JSON response and serves it offline; a miss fails like a dead network', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'replay-test-'))

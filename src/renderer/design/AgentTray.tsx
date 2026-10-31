@@ -1,10 +1,8 @@
 import { useId, useState, type ReactElement } from 'react'
 import type { AgentChip } from '../../shared/protocol'
-import { Icon, type IconName } from './icons'
+import { Icon } from './icons'
 
-const KIND_ICON: Record<AgentChip['kind'], IconName> = { scam_check: 'shield', lookup: 'search', lesson_summary: 'doc' }
 const STATUS_TEXT: Record<AgentChip['status'], string> = { running: 'Looking', done: 'Done', error: 'Couldn’t finish', cancelled: 'Stopped' }
-const STATUS_ICON: Record<Exclude<AgentChip['status'], 'running'>, IconName> = { done: 'check', error: 'alert', cancelled: 'x' }
 
 function Detail({ chip }: { chip: AgentChip }): ReactElement {
   const result = chip.result
@@ -39,10 +37,9 @@ function AgentChipView({ chip, onCancel }: { chip: AgentChip; onCancel: (id: str
   return (
     <div className="al-agent" data-status={chip.status} role="listitem">
       <button type="button" className="al-agent__head" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen((v) => !v)}>
-        <Icon name={KIND_ICON[chip.kind]} />
         <span className="al-agent__title">{chip.title}</span>
         <span className="al-agent__status">
-          {chip.status === 'running' ? <span className="al-spinner" aria-hidden="true" /> : <Icon name={STATUS_ICON[chip.status]} />}
+          {chip.status === 'running' ? <span className="al-spinner" aria-hidden="true" /> : null}
           {STATUS_TEXT[chip.status]}
         </span>
         <span className="al-agent__chev">

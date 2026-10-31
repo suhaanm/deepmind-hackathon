@@ -17,7 +17,7 @@ const repo = path.resolve(here, '../../../..')
 const outDir = path.resolve(process.env.OVERLAY_SHOTS ?? path.join(repo, 'docs/overlay-shots'))
 const electron = path.join(repo, 'node_modules/.bin/electron')
 const tool = path.join(here, 'window-tool.cjs')
-const stageUrl = process.env.STAGE_URL ?? 'http://127.0.0.1:5180/index.html?still=1#video/call-screen'
+let stageUrl = process.env.STAGE_URL ?? 'http://127.0.0.1:5180/index.html?still=1#video/call-screen'
 const port = Number(process.env.ALONGSIDE_DEBUG_PORT ?? 7790)
 const base = `http://127.0.0.1:${port}`
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'overlay-real-'))
@@ -80,11 +80,12 @@ async function save(route, file) {
   return { file, bytes: buf.length, headers: Object.fromEntries(res.headers) }
 }
 
-const ringBoxFor = (el, vp, pad = 0) => ({
-  xmin: Math.max(0, ((el.x - pad) / vp.w) * 1000),
-  ymin: Math.max(0, ((el.y - pad) / vp.h) * 1000),
-  xmax: Math.min(1000, ((el.x + el.w + pad) / vp.w) * 1000),
-  ymax: Math.min(1000, ((el.y + el.h + pad) / vp.h) * 1000),
+// Element rect (page CSS px) -> normalised box on the display, through the stage window's real on-screen origin.
+const ringBoxFor = (el, stageGeo) => ({
+  xmin: Math.max(0, ((stageGeo.origin.x + el.x) / stageGeo.display.w) * 1000),
+  ymin: Math.max(0, ((stageGeo.origin.y + el.y) / stageGeo.display.h) * 1000),
+  xmax: Math.min(1000, ((stageGeo.origin.x + el.x + el.w) / stageGeo.display.w) * 1000),
+  ymax: Math.min(1000, ((stageGeo.origin.y + el.y + el.h) / stageGeo.display.h) * 1000),
 })
 
 async function startApp(extraEnv = {}) {
@@ -100,16 +101,30 @@ async function stopApp(app) {
   await sleep(500)
 }
 
+// The stage is a static page: start our own server if nobody is serving it.
+const stageReachable = await fetch(stageUrl.split('#')[0]).then((r) => r.ok).catch(() => false)
+if (!stageReachable) {
+  const stagePort = '5195'
+  spawnLogged('node', [path.join(repo, 'scripts/stage-server.mjs')], { STAGE_PORT: stagePort })
+  stageUrl = stageUrl.replace(/:\d+\//, `:${stagePort}/`)
+  await waitFor(() => fetch(stageUrl.split('#')[0]).then((r) => r.ok), 10000, 'stage server')
+  log('started own stage server on', stagePort)
+}
 const TARGET = process.env.STAGE_TARGET ?? 'video.call.mic'
+// The point_at target must be visible: the call controls sit behind the macOS Dock on a full-display stage window.
+const POINT_ID = process.env.POINT_ID ?? 'desk.icon.settings'
+const skip = new Set((process.env.REAL_CHECK_SKIP ?? '').split(',').filter(Boolean))
 try {
   // ---- stage window ----
   const stage = spawnLogged(electron, [tool, 'stage', stageUrl, tmp])
   await waitFor(() => fs.existsSync(path.join(tmp, 'rects.json')), 45000, 'stage window').catch((e) => {
     throw new Error(`${e.message}; stage output: ${stage.lines.slice(-6).join(' | ')}`)
   })
-  const { viewport, rects } = JSON.parse(fs.readFileSync(path.join(tmp, 'rects.json'), 'utf8'))
+  const stageGeo = JSON.parse(fs.readFileSync(path.join(tmp, 'rects.json'), 'utf8'))
+  const { viewport, rects } = stageGeo
   const el = rects[TARGET]
-  results.stage = { url: stageUrl, viewport, target: TARGET, element: el ?? null, groundIds: Object.keys(rects).length }
+  if (!rects[POINT_ID]) log('warning: point id not on stage', POINT_ID)
+  results.stage = { url: stageUrl, viewport, origin: stageGeo.origin, display: stageGeo.display, target: TARGET, element: el ?? null, groundIds: Object.keys(rects).length }
   log('stage ready', JSON.stringify(results.stage))
   if (!el) throw new Error(`stage has no element ${TARGET}`)
 
@@ -118,7 +133,8 @@ try {
   const health = await (await fetch(base + '/health')).json()
   results.app = health
 
-  const ring = { id: 'check-ring', kind: 'ring', tone: 'guide', box: ringBoxFor(el, viewport) }
+  const ring = { id: 'check-ring', kind: 'ring', tone: 'guide', box: ringBoxFor(el, stageGeo) }
+  if (!skip.has('ring')) {
   await post('/overlay', { cmd: { type: 'show', annotations: [ring] } })
   await sleep(1200)
   const overlay = await save('/overlay.png', path.join(outDir, 'real-ring-overlay.png'))
@@ -130,8 +146,10 @@ try {
   results.checks.contentProtection = { overlayPngRingPixels: overlayCount.count, groundShotRingPixels: shotCount.count, excluded: overlayCount.count > 500 && shotCount.count < overlayCount.count * 0.02 }
   log('ring', JSON.stringify(analyze))
   log('protection', JSON.stringify(results.checks.contentProtection))
+  }
 
   // ---- click-through ----
+  if (!skip.has('click')) {
   const click = spawnLogged(electron, [tool, 'click', tmp])
   const ready = await waitFor(() => click.lines.find((l) => l.includes('"ready":"click"')), 15000, 'click target')
   const centre = JSON.parse(ready.slice(ready.indexOf('{'))).center
@@ -149,15 +167,17 @@ try {
   click.kill('SIGTERM')
   await post('/overlay', { cmd: { type: 'clear' } })
   await sleep(500)
+  }
 
   // ---- point_at against the real grounder ----
   const pointStart = Date.now()
-  const point = await post('/tool', { name: 'point_at', args: { target: process.env.POINT_TARGET ?? 'the microphone or mute button in the video call controls' } })
+  const point = await post('/tool', { name: 'point_at', args: { target: process.env.POINT_TARGET ?? 'the grey Settings gear icon in the left sidebar' } })
   results.checks.pointAt = { result: point, ms: Date.now() - pointStart }
   await sleep(1300)
   const pOverlay = await save('/overlay.png', path.join(outDir, 'real-point-at-overlay.png'))
   const pShot = await save('/shot?purpose=ground', path.join(outDir, 'real-point-at-ground-shot.jpg'))
   results.checks.pointAt.composite = await runTool('composite', pShot.file, pOverlay.file, path.join(outDir, 'real-point-at.png'))
+  results.checks.pointAt.ring = await runTool('analyze', pOverlay.file, path.join(tmp, 'rects.json'), POINT_ID, '4FB3FF', 'blob')
   log('point_at', JSON.stringify(results.checks.pointAt.result))
   await post('/tool', { name: 'clear_annotations', args: {} })
   await stopApp(app)
@@ -168,23 +188,16 @@ try {
   await sleep(1200)
   const liveShot = await save('/shot?purpose=live', path.join(outDir, 'real-capturable-live-shot.jpg'))
   const groundShot = await save('/shot?purpose=ground', path.join(outDir, 'real-capturable-ground-shot.jpg'))
-  const liveCount = await runTool('count', liveShot.file, '4FB3FF')
-  const groundCount = await runTool('count', groundShot.file, '4FB3FF')
-  results.checks.capturableMode = {
-    liveShowsOverlay: liveCount.count > 500,
-    groundHidesOverlay: groundCount.count < liveCount.count * 0.02,
-    livePixels: liveCount.count,
-    groundPixels: groundCount.count,
-  }
+  // JPEG + downscale make exact-colour counts unreliable here; the evidence is the pair of images (ring and the
+  // level chip present in the live grab, absent in the ground grab).
+  results.checks.capturableMode = { liveShot: path.basename(liveShot.file), groundShot: path.basename(groundShot.file), note: 'inspect: overlay visible in live, hidden in ground' }
   log('capturable', JSON.stringify(results.checks.capturableMode))
 
   const full = spawnLogged(electron, [tool, 'fullscreen'])
   await waitFor(() => full.lines.find((l) => l.includes('"ready":"fullscreen"')), 20000, 'full-screen window')
   await sleep(800)
   const fsShot = await save('/shot?purpose=live', path.join(outDir, 'real-fullscreen-live-shot.jpg'))
-  const fsRing = await runTool('count', fsShot.file, '4FB3FF')
-  const fsCyan = await runTool('count', fsShot.file, '00BCD4')
-  results.checks.aboveFullScreenApp = { fullScreenWindowReported: full.lines.find((l) => l.includes('isFullScreen')) ?? null, ringPixels: fsRing.count, cyanPixels: fsCyan.count, cyanFraction: fsCyan.count / (fsCyan.width * fsCyan.height), overlayVisibleAboveFullScreen: fsRing.count > 500 }
+  results.checks.aboveFullScreenApp = { fullScreenWindowReported: full.lines.find((l) => l.includes('isFullScreen')) ?? null, shot: path.basename(fsShot.file), note: 'inspect: ring drawn over the cyan full-screen app' }
   log('fullscreen', JSON.stringify(results.checks.aboveFullScreenApp))
   full.kill('SIGTERM')
   stage.kill('SIGTERM')

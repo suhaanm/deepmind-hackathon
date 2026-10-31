@@ -70,7 +70,12 @@ export class FakeWebSocket {
 export class FakeMic implements AudioInput {
   push: ((b64: string, level: number) => void) | null = null
   stopped = false
+  starts = 0
+  failStart = false
   async start(onChunk: (b64: string, level: number) => void): Promise<void> {
+    this.starts++
+    if (this.failStart) throw new DOMException('Permission denied', 'NotAllowedError')
+    this.stopped = false
     this.push = onChunk
   }
   stop(): void {
@@ -113,3 +118,9 @@ export class FakeSpeaker implements AudioOutput {
 }
 
 export const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms))
+
+// Smallest header-valid JPEG of a given size (SOI, SOF0, EOI): passes the frame size check, never decoded in tests.
+export function headerJpeg(width = 1280, height = 720): string {
+  const sof = [0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 255, width >> 8, width & 255, 0x03, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1]
+  return btoa(String.fromCharCode(0xff, 0xd8, ...sof, 0xff, 0xd9))
+}

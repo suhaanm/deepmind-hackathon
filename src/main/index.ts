@@ -4,13 +4,20 @@ import { app, systemPreferences } from 'electron'
 import { IPC } from '../shared/ipc'
 import type { EventArgs, EventChannel } from '../shared/ipc'
 import { Bus } from './bus'
-import { ConfirmBroker } from './confirm'
+import { ConfirmBroker, dismissConfirmOnStepVerified } from './confirm'
 import type { ServiceContext } from './context'
 import { startDebugServer } from './debug-server'
+import { redactingLog } from './gemini/redact'
 import { registerHotkeys } from './hotkey'
 import { registerIpc } from './ipc'
+import { registerLoginItem } from './login-item'
+import { createPermissions } from './permissions'
+import { registerTray } from './tray'
+import type { ShellTray } from './tray'
 import { createServices } from './services'
 import { registerSession } from './session'
+import { registerShowtime } from './showtime'
+import { restoreProfile } from './showtime/seed'
 import { SettingsStore } from './settings'
 import { StateStore } from './state'
 import { createDispatcher } from './tools/dispatcher'
@@ -21,6 +28,7 @@ if (process.env.ALONGSIDE_USERDATA) app.setPath('userData', path.resolve(process
 dotenv.config({ path: path.join(app.getAppPath(), '.env'), quiet: true })
 
 const flag = (name: string) => process.env[name] === '1'
+let shellTray: ShellTray | null = null // SHELL: the menu-bar item keeps the app alive when the dock window is hidden
 
 void app.whenReady().then(async () => {
   const headless = flag('ALONGSIDE_HEADLESS')
@@ -38,7 +46,7 @@ void app.whenReady().then(async () => {
     userDataDir,
     sendOverlay: (cmd) => windows.sendOverlay(IPC.overlayCmd, cmd),
     sendDock: <C extends EventChannel>(channel: C, ...args: EventArgs<C>) => windows.sendDock(channel, ...args),
-    log: (scope, ...args) => console.log(`[${scope}]`, ...args),
+    log: redactingLog((scope, ...args) => console.log(`[${scope}]`, ...args)), // LIVE: no key/blob/long text in any lane's logs
   }
 
   // Coalesce bursts of patches into one broadcast per tick.
@@ -52,22 +60,34 @@ void app.whenReady().then(async () => {
     })
   })
 
+  // DEMO: a walkthrough that was killed mid-way left the demo profile in place: put the real one back before anything reads it.
+  await restoreProfile(userDataDir).catch(() => undefined)
   const services = createServices(ctx)
   if (flag('ALONGSIDE_DEV_STAGE') || flag('ALONGSIDE_RECORD') || process.env.ALONGSIDE_REPLAY) void import('./dev').then((dev) => dev.installDev({ ctx, services })) // QA hooks + record/replay (dev only)
   const confirm = new ConfirmBroker(state)
+  dismissConfirmOnStepVerified(bus, confirm) // LIVE: a verified step dismisses a stale approval panel
   const dispatch = createDispatcher(ctx, services, confirm)
   const session = registerSession(ctx, services, confirm)
-  registerIpc({ ctx, services, windows, dispatch, confirm, session })
+  const permissions = createPermissions({ log: (...args) => ctx.log('permissions', ...args) })
+  registerIpc({ ctx, services, windows, dispatch, confirm, session, permissions })
+  const showtime = registerShowtime({ ctx, services, windows, dispatch, confirm, session }) // DEMO: IPC showtime:* + bus showtime:request
 
   const unregisterHotkeys = registerHotkeys(bus, settings, { state, stop: (r) => session.stop(r) })
+  const unregisterLoginItem = registerLoginItem(settings, { log: (...args) => ctx.log('login-item', ...args) })
+  if (!headless) shellTray = registerTray({ bus, state, settings, windows, stop: (r) => session.stop(r), showtimeRunning: () => showtime.active(), log: (...args) => ctx.log('tray', ...args) })
   app.on('will-quit', () => {
+    void showtime.dispose()
+    shellTray?.dispose()
+    unregisterLoginItem()
+    permissions.dispose()
     unregisterHotkeys()
     services.agents.dispose?.() // AGENTS hook: dispose on quit
     settings.flush()
   })
 
-  if (!app.isPackaged || flag('ALONGSIDE_DEBUG')) {
-    startDebugServer({ ctx, services, dispatch, session, capture: { overlayPng: windows.overlayPng, dockPng: windows.dockPng } })
+  // The debug server has no auth (it serves /shot, /state, /tool, /settings): opt-in only, never by default.
+  if (flag('ALONGSIDE_DEBUG')) {
+    startDebugServer({ ctx, services, dispatch, session, capture: { overlayPng: windows.overlayPng, dockPng: windows.dockPng }, tray: shellTray ?? undefined })
   }
 
   if (!headless && !flag('ALONGSIDE_MOCK') && process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('microphone') === 'not-determined') {
@@ -75,4 +95,7 @@ void app.whenReady().then(async () => {
   }
 })
 
-app.on('window-all-closed', () => app.quit())
+// With a menu-bar item the app keeps running when the dock is hidden; without one there is no way back in, so quit.
+app.on('window-all-closed', () => {
+  if (!shellTray?.hasTray()) app.quit()
+})

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LiveSession, type LiveSessionOptions } from '../../src/renderer/live/LiveSession'
 import type { LiveEndReason, ToolCallRequest } from '../../src/renderer/live/types'
-import { FakeMic, FakeSpeaker, FakeWebSocket, tick } from './fakes'
+import { FakeMic, FakeSpeaker, FakeWebSocket, headerJpeg, tick } from './fakes'
 
 type Rec = { ended: LiveEndReason[]; phases: string[]; transcripts: Array<{ role: string; text: string; final: boolean }>; errors: string[]; metrics: unknown[] }
 
@@ -83,6 +83,135 @@ describe('LiveSession lifecycle', () => {
     expect(ended).toEqual(['error'])
     expect(errors[0]).toContain('Thinking level')
     expect(mic.stopped).toBe(true)
+  })
+})
+
+describe('chat (text mode and missing microphone)', () => {
+  it('textOnly sessions never open the mic, never play the model voice, and answer typed turns as chat transcripts', async () => {
+    const { session, mic, speaker, ws, rec } = await boot({}, { voiceName: 'Charon', textOnly: true })
+    expect(mic.starts).toBe(0)
+    expect(session.isTextMode).toBe(true)
+    expect(session.sendUserText('how do I make text bigger?')).toBe(true)
+    expect(ws().realtime.at(-1)).toEqual({ text: 'how do I make text bigger?' })
+    ws().serverSend(audioEvent)
+    ws().serverSend({ serverContent: { outputTranscription: { text: 'Open Settings, then Display.' } } })
+    ws().serverSend({ serverContent: { generationComplete: true } })
+    expect(speaker.played).toEqual([]) // muted
+    // Final at generationComplete (turnComplete would trail by the length of the speech nobody is playing).
+    expect(rec.transcripts.at(-1)).toEqual({ role: 'assistant', text: 'Open Settings, then Display.', final: true })
+    expect(session.phase).toBe('live')
+    await session.stop()
+  })
+
+  it('micOptional keeps the session alive when the microphone is blocked, and typing still works', async () => {
+    FakeWebSocket.reset()
+    const mic = new FakeMic()
+    mic.failStart = true
+    const session = new LiveSession({
+      host: { getAuth: async () => ({ kind: 'token', value: 't' }), systemInstruction: async () => 'S' },
+      audioIn: mic,
+      audioOut: new FakeSpeaker(),
+      model: 'm',
+      idleTimeoutMs: 0,
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    const notices: string[] = []
+    session.on('notice', (n) => notices.push(n.kind))
+    await session.start({ voiceName: 'Charon', micOptional: true })
+    expect(notices).toEqual(['mic_unavailable'])
+    expect(session.phase).toBe('live')
+    expect(session.sendUserText('hello')).toBe(true)
+    expect(FakeWebSocket.instances[0]!.realtime.at(-1)).toEqual({ text: 'hello' })
+    await session.stop()
+  })
+
+  it('without micOptional a blocked microphone is a start failure', async () => {
+    FakeWebSocket.reset()
+    const mic = new FakeMic()
+    mic.failStart = true
+    const session = new LiveSession({
+      host: { getAuth: async () => ({ kind: 'token', value: 't' }), systemInstruction: async () => 'S' },
+      audioIn: mic,
+      audioOut: new FakeSpeaker(),
+      model: 'm',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    await expect(session.start({ voiceName: 'Charon' })).rejects.toThrow(/Permission denied/)
+  })
+
+  it('switching to text mode releases the mic and mutes playback; switching back reopens the mic', async () => {
+    const { session, mic, speaker, ws } = await boot()
+    expect(mic.starts).toBe(1)
+    await session.setTextMode(true)
+    expect(mic.stopped).toBe(true)
+    expect(ws().realtime.at(-1)).toEqual({ audioStreamEnd: true })
+    ws().serverSend(audioEvent)
+    expect(speaker.played).toEqual([])
+    await session.setTextMode(false)
+    expect(mic.starts).toBe(2)
+    expect(session.isTextMode).toBe(false)
+    ws().serverSend({ serverContent: { turnComplete: true } })
+    ws().serverSend(audioEvent)
+    expect(speaker.played).toEqual(['AAAA'])
+    await session.stop()
+  })
+
+  it('typed turns count as learner activity for the idle timer', async () => {
+    vi.useFakeTimers()
+    const { session, rec } = await boot({ idleTimeoutMs: 20_000 })
+    await vi.advanceTimersByTimeAsync(15_000)
+    session.sendUserText('still here')
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(rec.ended).toEqual([])
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(rec.ended).toEqual(['idle'])
+  })
+})
+
+describe('stop while connecting', () => {
+  const make = (systemInstruction: () => Promise<string>) => {
+    FakeWebSocket.reset()
+    FakeWebSocket.autoSetup = false
+    FakeWebSocket.failOpen = false
+    const mic = new FakeMic()
+    const session = new LiveSession({
+      host: { getAuth: async () => ({ kind: 'token', value: 't' }), systemInstruction },
+      audioIn: mic,
+      audioOut: new FakeSpeaker(),
+      model: 'm',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    const errors: string[] = []
+    const ended: string[] = []
+    session.on('error', (e) => errors.push(e.message))
+    session.on('ended', (e) => ended.push(e.reason))
+    return { session, mic, errors, ended }
+  }
+
+  it('before the socket exists: opens no socket and no mic, start() resolves quietly', async () => {
+    const { session, mic, errors, ended } = make(async () => {
+      await tick(20)
+      return 'S'
+    })
+    const p = session.start({ voiceName: 'Charon' })
+    await session.stop('stop')
+    await p
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(mic.push).toBeNull()
+    expect(errors).toEqual([])
+    expect(ended).toEqual(['stop'])
+  })
+
+  it('while the socket is opening: closes it and does not report an error', async () => {
+    const { session, mic, errors, ended } = make(async () => 'S')
+    const p = session.start({ voiceName: 'Charon' })
+    await tick(5)
+    await session.stop('stop')
+    await p
+    expect(FakeWebSocket.instances[0]!.readyState).toBe(3)
+    expect(mic.stopped).toBe(true)
+    expect(errors).toEqual([])
+    expect(ended).toEqual(['stop'])
   })
 })
 
@@ -313,6 +442,17 @@ describe('endings', () => {
     expect(rec.ended).toEqual(['idle'])
   })
 
+  it('loud room noise without recognised speech does not keep the session (and screen reading) alive', async () => {
+    vi.useFakeTimers()
+    const { session, mic, rec } = await boot({ idleTimeoutMs: 20_000 })
+    for (let i = 0; i < 30; i++) {
+      mic.push!('QQ==', 0.3)
+      vi.advanceTimersByTime(1000)
+    }
+    expect(rec.ended).toEqual(['idle'])
+    void session
+  })
+
   it('a longer idle timeout can be set (lessons)', async () => {
     vi.useFakeTimers()
     const { session, rec } = await boot({ idleTimeoutMs: 20_000 })
@@ -333,6 +473,89 @@ describe('endings', () => {
     speaker.drain()
     await tick(2)
     expect(rec.ended).toEqual(['goodbye'])
+  })
+})
+
+describe('idle accounting and echo guard', () => {
+  it('a silent 45 s session with 1 fps frames ends at ~20 s: frames never count as activity', async () => {
+    vi.useFakeTimers()
+    const grabbed: number[] = []
+    const { session, rec, ws } = await boot({
+      idleTimeoutMs: 20_000,
+      frames: {
+        grab: async () => {
+          grabbed.push(Date.now())
+          return { jpegBase64: headerJpeg(), changeScore: 0.5 }
+        },
+      },
+    })
+    for (let t = 0; t < 45; t++) await vi.advanceTimersByTimeAsync(1000)
+    expect(rec.ended).toEqual(['idle'])
+    expect(ws().realtime.filter((r) => r.video).length).toBeGreaterThan(10) // frames really were flowing
+    expect(rec.phases).not.toContain('speaking')
+    void session
+  })
+
+  it('model speech does not keep an idle session alive (a model talking to itself still ends)', async () => {
+    vi.useFakeTimers()
+    const { ws, rec, speaker } = await boot({ idleTimeoutMs: 20_000 })
+    for (let t = 0; t < 40; t++) {
+      if (t % 5 === 0) {
+        ws().serverSend(audioEvent)
+        ws().serverSend({ serverContent: { outputTranscription: { text: 'Are you still there? ' }, turnComplete: true } })
+        speaker.drain()
+      }
+      await vi.advanceTimersByTimeAsync(1000)
+    }
+    expect(rec.ended).toEqual(['idle'])
+  })
+
+  it('learner speech and stage directions do count as activity', async () => {
+    vi.useFakeTimers()
+    const { ws, session, rec } = await boot({ idleTimeoutMs: 20_000 })
+    await vi.advanceTimersByTimeAsync(15_000)
+    ws().serverSend({ serverContent: { inputTranscription: { text: 'what do I click next please' }, turnComplete: true } })
+    await vi.advanceTimersByTimeAsync(15_000)
+    session.injectText('[RUNNER] step 2')
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(rec.ended).toEqual([])
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(rec.ended).toEqual(['idle'])
+  })
+
+  it('recognises its own voice in the mic transcript: hides it, is not activity, switches to half duplex', async () => {
+    vi.useFakeTimers()
+    const notices: string[] = []
+    const { ws, session, mic, rec, speaker } = await boot({ idleTimeoutMs: 20_000 })
+    session.on('notice', (n) => notices.push(n.kind))
+    ws().serverSend(audioEvent)
+    ws().serverSend({ serverContent: { outputTranscription: { text: 'Look at the green Start call button at the bottom of the window. ' } } })
+    ws().serverSend({ serverContent: { inputTranscription: { text: 'look at the green start call button at the bottom of the window' } } })
+    ws().serverSend({ serverContent: { turnComplete: true } })
+    speaker.drain()
+    expect(rec.transcripts.filter((t) => t.role === 'user')).toEqual([])
+    expect(notices).toEqual(['echo_guard'])
+    // Half duplex now: mic chunks are not uploaded while the model speaks, but a loud shout is.
+    ws().serverSend(audioEvent)
+    const before = ws().realtime.length
+    mic.push!('QUIET', 0.05)
+    expect(ws().realtime.length).toBe(before)
+    mic.push!('SHOUT', 0.6)
+    expect(ws().realtime.length).toBe(before + 1)
+    // And a real answer afterwards is still captioned.
+    ws().serverSend({ serverContent: { turnComplete: true } })
+    speaker.drain()
+    await vi.advanceTimersByTimeAsync(1000)
+    ws().serverSend({ serverContent: { inputTranscription: { text: 'I clicked it already, what now' }, turnComplete: true } })
+    expect(rec.transcripts.filter((t) => t.role === 'user' && t.final).map((t) => t.text)).toEqual(['I clicked it already, what now'])
+  })
+
+  it('does not mistake a real question that shares a few words with the answer for an echo', async () => {
+    const { ws, rec } = await boot()
+    ws().serverSend(audioEvent)
+    ws().serverSend({ serverContent: { outputTranscription: { text: 'Click the green Start call button at the bottom. ' }, turnComplete: true } })
+    ws().serverSend({ serverContent: { inputTranscription: { text: 'where is the green button on my screen' }, turnComplete: true } })
+    expect(rec.transcripts.filter((t) => t.role === 'user' && t.final).map((t) => t.text)).toEqual(['where is the green button on my screen'])
   })
 })
 

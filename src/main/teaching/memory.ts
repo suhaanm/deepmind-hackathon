@@ -1,5 +1,5 @@
 // The "memory callback": one warm, concrete line about last time, built from the learner snapshot. Pure.
-import type { LearnerSnapshot, SkillId } from '../../shared/protocol'
+import type { LearnerSnapshot, SkillId, SkillState } from '../../shared/protocol'
 import { DAY_MS } from './levels'
 import { SKILLS } from './skills/definitions'
 
@@ -26,14 +26,15 @@ export function memoryCallback(snapshot: LearnerSnapshot, now: number): string |
   const when = describeWhen(last.at, now)
   const hint = snapshot.whatWorks[snapshot.whatWorks.length - 1]
   const tail = hint ? ` Something that helped: ${hint}.` : ''
-  return `${when.charAt(0).toUpperCase()}${when.slice(1)} you practised "${plainSkill(last.skillId)}". ${last.summary}${tail}`.replace(/\s+/g, ' ').trim()
+  const lead = last.skillId && last.skillId !== 'custom' ? `${when.charAt(0).toUpperCase()}${when.slice(1)} you practised "${plainSkill(last.skillId)}".` : `${when.charAt(0).toUpperCase()}${when.slice(1)}:`
+  return `${lead} ${last.summary}${tail}`.replace(/\s+/g, ' ').trim()
 }
 
 // "Remember" nudge for a skill that is due for review.
 export function reviewNudge(snapshot: LearnerSnapshot, now: number): { skillId: SkillId; text: string } | null {
   let best: { skillId: SkillId; due: number } | null = null
-  for (const [id, s] of Object.entries(snapshot.skills) as [SkillId, LearnerSnapshot['skills'][SkillId]][]) {
-    if (s.nextReview !== null && s.nextReview <= now && (!best || s.nextReview < best.due)) best = { skillId: id, due: s.nextReview }
+  for (const [id, s] of Object.entries(snapshot.skills) as [SkillId, SkillState | undefined][]) {
+    if (s && s.nextReview !== null && s.nextReview <= now && (!best || s.nextReview < best.due)) best = { skillId: id, due: s.nextReview }
   }
   if (!best) return null
   return { skillId: best.skillId, text: `A quick refresher on "${plainSkill(best.skillId)}" is due. Offer it, don't insist.` }

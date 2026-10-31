@@ -218,6 +218,22 @@ describe('wake spotter', () => {
     expect(r.spotter.getStatus().listening).toBe(true)
   })
 
+  it('repeated identical setSettings calls (the dock sends one per state update) never retrigger a connection', async () => {
+    const r = rig({ failStarts: 99 })
+    await r.spotter.start()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(r.spotter.getStatus().state).toBe('unavailable')
+    const attempts = r.engines.length
+    for (let i = 0; i < 20; i++) r.spotter.setSettings({ wakeEnabled: true, pushToTalkOnly: false, micMuted: false })
+    await vi.advanceTimersByTimeAsync(0) // (the 20 s background recovery is a separate, deliberate retry)
+    expect(r.engines.length).toBe(attempts)
+    // A genuine change (mute then unmute) is allowed to try again.
+    r.spotter.setSettings({ micMuted: true })
+    r.spotter.setSettings({ micMuted: false })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(r.engines.length).toBeGreaterThan(attempts)
+  })
+
   it('reconnects with backoff after a dropped stream, and keeps hearing the name afterwards', async () => {
     const r = rig()
     await r.spotter.start()
@@ -238,6 +254,76 @@ describe('wake spotter', () => {
     expect(s.state).toBe('unavailable')
     expect(s.detail).toMatch(/button or the keyboard shortcut/)
     expect(r.audio.open).toBe(false)
+  })
+
+  it('never puts raw API or IPC error text in the user-facing status (plain English only)', async () => {
+    const raw = `Error invoking remote method 'wake:token': ApiError: {"error":{"code":500,"status":"INTERNAL"}}`
+    const audio = new FakeAudio()
+    const spotter = createWakeSpotter({
+      personas: PERSONA_LIST,
+      createAudioSource: () => audio,
+      createEngine: (h) => {
+        const e = new FakeEngine(h, new Error(raw), false)
+        return e
+      },
+      onWake: () => undefined,
+    })
+    const seen: WakeStatus[] = []
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const s2 = createWakeSpotter({
+      personas: PERSONA_LIST,
+      createAudioSource: () => new FakeAudio(),
+      createEngine: (h) => new FakeEngine(h, new Error(raw), false),
+      onStatus: (st) => seen.push(st),
+      onWake: () => undefined,
+    })
+    await s2.start()
+    await vi.advanceTimersByTimeAsync(60_000)
+    const details = seen.map((x) => x.detail).filter(Boolean) as string[]
+    expect(details.length).toBeGreaterThan(0)
+    for (const d of details) {
+      expect(d).not.toMatch(/ApiError|invoking remote|wake:token|500|\{|Error:/)
+    }
+    expect(s2.getStatus().detail).toBe('Voice activation is unavailable right now. Use the button or the keyboard shortcut.')
+    expect(warn).toHaveBeenCalled() // the raw error is kept for the console only
+    warn.mockRestore()
+    spotter.dispose()
+    s2.dispose()
+  })
+
+  it('recovers by itself once the network is back (no restart), without reopening the mic while it is down', async () => {
+    let net = false
+    const audio = new FakeAudio()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const engines: FakeEngine[] = []
+    const spotter = createWakeSpotter({
+      personas: PERSONA_LIST,
+      createAudioSource: () => audio,
+      getToken: async () => {
+        if (!net) throw new Error('fetch failed')
+        return { token: 't' }
+      },
+      createEngine: (h) => {
+        const e = new FakeEngine(h, net ? null : new Error('fetch failed'), true)
+        engines.push(e)
+        return e
+      },
+      onWake: () => undefined,
+    })
+    await spotter.start()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(spotter.getStatus().state).toBe('unavailable')
+    const micOpens = audio.starts
+    await vi.advanceTimersByTimeAsync(120_000) // network still down: probes only, mic stays closed
+    expect(audio.starts).toBe(micOpens)
+    expect(audio.open).toBe(false)
+    net = true
+    await vi.advanceTimersByTimeAsync(25_000)
+    expect(spotter.getStatus()).toMatchObject({ state: 'listening', listening: true })
+    expect(spotter.getStatus().detail).toBeUndefined()
+    expect(audio.open).toBe(true)
+    warn.mockRestore()
+    spotter.dispose()
   })
 
   it('microphone permission denied is unavailable immediately, with a clear reason', async () => {
@@ -261,6 +347,30 @@ describe('wake spotter', () => {
     expect(r.engines[1]!.sent).toHaveLength(1)
     r.engines[1]!.h.onTranscript('Hey Amelia', false)
     expect(r.wakes[0]?.personaId).toBe('amelia')
+  })
+
+  it('a rotation that never gets ready is abandoned, the old stream keeps listening, and rotation is retried', async () => {
+    const audio = new FakeAudio()
+    const engines: FakeEngine[] = []
+    const spotter = createWakeSpotter({
+      personas: PERSONA_LIST,
+      createAudioSource: () => audio,
+      maxSessionMs: 10_000,
+      createEngine: (h) => {
+        const e = new FakeEngine(h, null, engines.length === 0) // only the first engine becomes ready
+        engines.push(e)
+        return e
+      },
+      onWake: () => undefined,
+    })
+    await spotter.start()
+    await vi.advanceTimersByTimeAsync(10_100)
+    expect(engines).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(8_100)
+    expect(engines[1]!.stopped).toBe(true)
+    expect(engines[0]!.stopped).toBe(false)
+    expect(spotter.getStatus().listening).toBe(true)
+    spotter.dispose()
   })
 
   it('does not rotate in the middle of an utterance', async () => {

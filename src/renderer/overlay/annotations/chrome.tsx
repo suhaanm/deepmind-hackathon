@@ -1,6 +1,6 @@
 // Screen-level furniture: the captions band (bottom) and the help-level chip echo (top). Both are pictures
 // only; the real controls live in the dock window.
-import type { ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import type { CaptionSpeaker } from '../../../shared/protocol'
 import type { AnnotationStyle } from '../../design/annotation-style'
 import { LEVEL_SUPPORT } from '../../design/levels'
@@ -18,12 +18,15 @@ export function tailText(text: string, max = 240): string {
 
 export function CaptionBand({
   caption,
+  topY,
   speakerName,
   style,
   viewport,
   onSize,
 }: {
   caption: CaptionState
+  // null = the usual bottom position; a number = pinned to the top at this y (when the bottom would cover a mark).
+  topY: number | null
   speakerName: string
   style: AnnotationStyle
   viewport: Size
@@ -32,7 +35,7 @@ export function CaptionBand({
   const c = style.caption
   const exiting = caption.exitingAt !== null
   return (
-    <div className="ov-html" style={{ left: 0, width: '100%', bottom: c.bottomInset, display: 'flex', justifyContent: 'center' }}>
+    <div className="ov-html" style={{ left: 0, width: '100%', ...(topY === null ? { bottom: c.bottomInset } : { top: topY }), display: 'flex', justifyContent: 'center' }}>
       <Measured
         id="caption"
         onSize={onSize}
@@ -70,10 +73,60 @@ export function speakerLabel(speaker: CaptionSpeaker, names: Partial<Record<Capt
   return ''
 }
 
-export function LevelChipEcho({ chip, style, top, onSize }: { chip: ChipState; style: AnnotationStyle; top: number; onSize: (id: string, size: Size) => void }): ReactElement {
+const BAR_STAGGER_MS = 90
+const BARS = [1, 2, 3, 4] as const
+
+// When bar `i` (1 = bottom) flips between its old and new state, in ms after the change starts. Draining empties
+// the top bar first; filling (a step back up) fills from the bottom.
+function barDelay(i: number, from: number, to: number): number {
+  return (to < from ? from - i : i - from - 1) * BAR_STAGGER_MS
+}
+
+// The level chip echo. On a level change the bars start at the OLD level and, one frame after mount, switch to the
+// new one so the CSS transition shows them draining (top bar first, 90 ms apart); the label cross-fades.
+// `progress` (harness only) renders a fixed frame of that animation (0 = before, 1 = after) with no transitions.
+export function LevelChipEcho({
+  chip,
+  style,
+  top,
+  onSize,
+  progress,
+}: {
+  chip: ChipState
+  style: AnnotationStyle
+  top: number
+  onSize: (id: string, size: Size) => void
+  progress?: number
+}): ReactElement {
   const l = style.levelChip
-  const filled = LEVEL_SUPPORT[chip.level]
   const exiting = chip.exitingAt !== null
+  const to = LEVEL_SUPPORT[chip.level]
+  const from = chip.from ? LEVEL_SUPPORT[chip.from.level] : to
+  const animate = chip.from !== null && !style.reducedMotion && l.changeMs > 0 && progress === undefined
+  const [settled, setSettled] = useState(!animate)
+  const [showOld, setShowOld] = useState(chip.from !== null && chip.from.label !== chip.label)
+  useEffect(() => {
+    if (!animate) return
+    const frame = requestAnimationFrame(() => setSettled(true))
+    const done = setTimeout(() => setShowOld(false), l.changeMs + BAR_STAGGER_MS * 3 + 100)
+    return () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(done)
+    }
+  }, [animate, l.changeMs])
+  const total = l.changeMs + BAR_STAGGER_MS * 3
+  const frozen = progress !== undefined ? progress * total : null
+  const filledNow = (i: number): boolean => {
+    const target = i <= to
+    if (frozen !== null) return frozen >= barDelay(i, from, to) + l.changeMs * 0.35 ? target : i <= from
+    return settled ? target : i <= from
+  }
+  // Old label fades out first, then the new one fades in: never two labels at half strength on top of each other.
+  const t = frozen !== null ? Math.min(1, Math.max(0, frozen / total)) : settled ? 1 : 0
+  const oldOpacity = Math.max(0, 1 - 2 * t)
+  const newOpacity = Math.max(0, 2 * t - 1)
+  const crossfade = chip.from !== null && chip.from.label !== chip.label && showOld
+
   return (
     <div key={chip.changedAt} className="ov-html" style={{ left: 0, width: '100%', top, display: 'flex', justifyContent: 'center' }}>
       <Measured
@@ -96,20 +149,25 @@ export function LevelChipEcho({ chip, style, top, onSize }: { chip: ChipState; s
         }}
       >
         <span aria-hidden style={{ display: 'inline-flex', alignItems: 'flex-end', gap: l.fontSize * 0.15, height: l.fontSize }}>
-          {[1, 2, 3, 4].map((i) => (
+          {BARS.map((i) => (
             <span
               key={i}
               style={{
                 width: l.fontSize * 0.2,
                 height: l.fontSize * (0.35 + i * 0.16),
                 borderRadius: 2,
-                background: i <= filled ? '#fff' : 'rgba(255,255,255,0.28)',
-                transition: `background ${l.changeMs}ms ease`,
+                background: filledNow(i) ? '#fff' : 'rgba(255,255,255,0.28)',
+                transition: frozen !== null || !animate ? 'none' : `background ${l.changeMs * 0.45}ms ease ${barDelay(i, from, to)}ms`,
               }}
             />
           ))}
         </span>
-        <span>{chip.label}</span>
+        <span style={{ display: 'inline-grid' }}>
+          {crossfade && chip.from ? (
+            <span style={{ gridArea: '1 / 1', opacity: oldOpacity, transition: frozen !== null ? 'none' : `opacity ${l.changeMs * 0.4}ms ease` }}>{chip.from.label}</span>
+          ) : null}
+          <span style={{ gridArea: '1 / 1', opacity: crossfade ? newOpacity : 1, transition: frozen !== null ? 'none' : `opacity ${l.changeMs * 0.4}ms ease ${l.changeMs * 0.45}ms` }}>{chip.label}</span>
+        </span>
       </Measured>
     </div>
   )

@@ -226,7 +226,6 @@
 
 /* settings that visibly reshape the UI */
 :root[data-big-annotations='true'] {
-  --ui-scale: 1.12;
   --focus-w: 4px;
   --target-min: 52px;
 }
@@ -239,6 +238,36 @@
   --ls-body: 0.03em;
   --ws-body: 0.12em;
   --fw-body: 400;
+}
+
+/*
+ * Glass: translucent surfaces over the desktop (macOS vibrancy shows through). Text-bearing shell areas never drop below
+ * 70% opaque and cards stay at 94% or more, and the secondary ink colours are darkened or brightened so the contrast
+ * test passes over the worst-case backdrops (pure black and pure white). High contrast switches glass off.
+ * --glass-shell and --glass-card are set from Settings by apply-settings.ts.
+ */
+:root {
+  --glass-shell: 100%;
+  --glass-card: 100%;
+  --glass-blur: 26px;
+}
+:root[data-glass='true'] {
+  --ink-muted: #2f2a26;
+  --ink-subtle: #3d3732;
+  --bg: color-mix(in srgb, #f6f1e9 var(--glass-shell), transparent);
+  --surface: color-mix(in srgb, #fffdf8 var(--glass-shell), transparent);
+  --surface-raised: color-mix(in srgb, #ffffff var(--glass-card), transparent);
+  --surface-sunken: color-mix(in srgb, #eee7da var(--glass-card), transparent);
+  --scrim: rgba(28, 25, 23, 0.4);
+}
+:root[data-theme='dark'][data-glass='true'] {
+  --ink-muted: #e6dfd3;
+  --ink-subtle: #e0d8cb;
+  --bg: color-mix(in srgb, #14110f var(--glass-shell), transparent);
+  --surface: color-mix(in srgb, #1d1916 var(--glass-shell), transparent);
+  --surface-raised: color-mix(in srgb, #27221e var(--glass-card), transparent);
+  --surface-sunken: color-mix(in srgb, #0f0d0b var(--glass-card), transparent);
+  --scrim: rgba(0, 0, 0, 0.5);
 }
 
 /* calm by default for anyone who asks the OS for less motion */

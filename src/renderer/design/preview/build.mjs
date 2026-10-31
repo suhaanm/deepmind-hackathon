@@ -46,6 +46,7 @@ ${read(join(here, 'preview.css'))}
 <div class="al-app pv" id="app"></div>
 <script>
 ${transpile(join(design, 'levels.ts'))}
+${transpile(join(design, '../dock/profile.ts'))}
 ${transpile(join(design, 'annotation-style.ts'))}
 ${read(join(here, 'preview.js'))}
 </script>

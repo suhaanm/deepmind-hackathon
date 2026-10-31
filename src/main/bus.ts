@@ -10,6 +10,8 @@ export interface BusEvents {
   'lesson:step': LessonStepEvent
   'level:changed': LevelChangedEvent
   'agent:update': { chip: AgentChip }
+  // DEMO owns the handler; SHELL (tray) emits it.
+  'showtime:request': { source: 'tray' | 'dock' | 'hotkey' | 'cli'; full?: boolean; stop?: boolean }
 }
 
 export type BusEventName = keyof BusEvents

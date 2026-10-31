@@ -10,8 +10,11 @@ import {
   clamp01,
   GeminiError,
   imageInput,
+  isEnvironmental,
   jsonFormat,
   parseModelJson,
+  plainFailure,
+  withSafeLog,
   type GeminiDeps,
 } from './client'
 import { INJECTION_GUARD, STYLE_RULES } from './prompts'
@@ -79,7 +82,8 @@ const verdictFrom = (m: ModelVerdict): Verdict => {
   }
 }
 
-export function createVerifier(deps: GeminiDeps, config: VerifierConfig = {}): Verifier {
+export function createVerifier(rawDeps: GeminiDeps, config: VerifierConfig = {}): Verifier {
+  const deps = withSafeLog(rawDeps)
   const confident = config.confident ?? 0.8
   const liteMs = config.liteTimeoutMs ?? 6000
   const flashMs = config.flashTimeoutMs ?? 9000
@@ -112,6 +116,7 @@ export function createVerifier(deps: GeminiDeps, config: VerifierConfig = {}): V
       const text = prompt(expected, instruction)
 
       let best: Verdict | null = null
+      let lastError: unknown = null
       const plan: Array<[string, string, string, number]> = [
         ['lite', deps.models.lite, 'low', liteMs],
         ['flash', deps.models.flash, 'low', flashMs],
@@ -124,11 +129,13 @@ export function createVerifier(deps: GeminiDeps, config: VerifierConfig = {}): V
           if (decisive(v)) return v
           deps.log('verifier', `${name} not decisive (completed=${v.completed} conf=${v.confidence.toFixed(2)} uncertain=${v.uncertain}); escalating`)
         } catch (e) {
-          deps.log('verifier', `${name} failed: ${e instanceof GeminiError ? e.code : String(e)}`)
+          lastError = e
+          deps.log('verifier', `${name} failed: ${e instanceof GeminiError ? e.code : 'error'}`)
         }
       }
       if (best) return { ...best, completed: false, uncertain: true } // nobody was sure: say so
-      return { completed: false, confidence: 0, evidence: "I couldn't check the screen just now.", uncertain: true }
+      const why = isEnvironmental(lastError) ? `${plainFailure(lastError)} So I couldn't check the screen.` : "I couldn't check the screen just now."
+      return { completed: false, confidence: 0, evidence: why, uncertain: true }
     },
   }
 }

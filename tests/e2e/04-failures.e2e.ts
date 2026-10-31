@@ -19,28 +19,29 @@ describe.skipIf(!REAL)('failure injection (real services)', () => {
     await tool('end_lesson', { summary: 'test cleanup' })
   })
 
-  it('Architect timeout falls back to the static plan quickly (start_lesson still works)', async (ctx) => {
+  // Built-in skills use static plans; only a custom goal reaches the Architect (Argon).
+  it('Architect timeout on a custom goal does not hang or crash: start_lesson answers (pointer fallback)', async (ctx) => {
     await setFault({ match: 'argon', mode: 'timeout' })
     const t0 = Date.now()
-    const { result } = await tool<{ stepCount: number; skillId: string }>('start_lesson', { goal: 'Join a video call with Lily' })
+    const { result } = await tool<{ stepCount: number; skillId: string }>('start_lesson', { goal: 'Teach me how to book a train ticket online' })
     const elapsed = Date.now() - t0
     const faulted = (await fetchLog()).filter((e) => e.faulted && /argon/.test(e.model ?? e.path))
     if (!faulted.length) return ctx.skip('Architect made no Argon call: fault not exercised (INCONCLUSIVE)')
     console.log(`[e2e] architect timeout: fallback after ${elapsed} ms`)
     expect(result.error, `start_lesson error: ${result.error}`).toBeUndefined()
-    expect(result.stepCount).toBeGreaterThanOrEqual(3)
+    expect(result.stepCount).toBeGreaterThanOrEqual(1)
     expect(elapsed, 'architect timeout must not leave the learner waiting').toBeLessThan(30_000)
   }, 120_000)
 
-  it('Architect HTTP 500 / garbage also falls back to a static plan', async (ctx) => {
+  it('Architect HTTP 500 / garbage on a custom goal also degrades gracefully', async (ctx) => {
     for (const mode of ['http500', 'garbage'] as const) {
       await tool('end_lesson', { summary: 'reset' })
       await setFault({ match: 'argon', mode })
-      const { result } = await tool<{ stepCount: number }>('start_lesson', { goal: 'Make the text bigger' })
+      const { result } = await tool<{ stepCount: number }>('start_lesson', { goal: 'Teach me how to book a train ticket online' })
       const faulted = (await fetchLog()).filter((e) => e.faulted === mode && /argon/.test(e.model ?? e.path))
       if (!faulted.length) return ctx.skip('Architect made no Argon call: fault not exercised (INCONCLUSIVE)')
       expect(result.error, `${mode}: ${result.error}`).toBeUndefined()
-      expect(result.stepCount).toBeGreaterThanOrEqual(3)
+      expect(result.stepCount).toBeGreaterThanOrEqual(1)
     }
   }, 120_000)
 

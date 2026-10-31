@@ -8,6 +8,8 @@ export interface Fixture {
   settings?: { bigAnnotations?: boolean; highContrast?: boolean; dyslexiaFont?: boolean; captions?: boolean }
   // Freeze the ghost cursor: 'flight' = mid first leg, 'press' = landed with the click echo, or ms.
   ghost?: 'flight' | 'press' | number
+  // Freeze the level-chip echo mid-change (0 before .. 1 after).
+  chip?: number
 }
 
 const box = (xmin: number, ymin: number, xmax: number, ymax: number): NormBox => ({ xmin, ymin, xmax, ymax })
@@ -94,6 +96,28 @@ export const FIXTURES: Record<string, Fixture> = {
     description: 'Captions band plus the level chip echo.',
     commands: [
       { type: 'caption', speaker: 'assistant', text: 'Click the round button with the little camera on it. It turns your picture on.', final: true },
+      { type: 'chip', level: 2, label: 'Walk with me' },
+    ],
+  },
+  'chip-before': {
+    description: 'Level chip echo before a change: Watch me, all four support bars full.',
+    commands: [{ type: 'chip', level: 1, label: 'Watch me' }],
+  },
+  'chip-mid': {
+    description: 'Level chip echo mid-change (Watch me -> Nudge me): the top bars are draining and the old label is fading out.',
+    chip: 0.4,
+    commands: [{ type: 'chip', level: 1, label: 'Watch me' }, { type: 'chip', level: 3, label: 'Nudge me' }],
+  },
+  'chip-after': {
+    description: 'Level chip echo after the change: Nudge me, two bars left.',
+    chip: 1,
+    commands: [{ type: 'chip', level: 1, label: 'Watch me' }, { type: 'chip', level: 3, label: 'Nudge me' }],
+  },
+  'caption-avoids': {
+    description: 'A target low on the screen (call controls): the captions band moves to the top, below the level chip, instead of covering the ring.',
+    commands: [
+      show({ id: 'r1', kind: 'ring', tone: 'guide', box: { xmin: 150, ymin: 880, xmax: 250, ymax: 965 }, step: 2, label: 'Mute' }, { id: 'a1', kind: 'arrow', tone: 'guide', to: { xmin: 150, ymin: 880, xmax: 250, ymax: 965 } }),
+      { type: 'caption', speaker: 'assistant', text: 'Check the microphone is not crossed out. Click it once if it is.', final: true },
       { type: 'chip', level: 2, label: 'Walk with me' },
     ],
   },

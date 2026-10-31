@@ -2,7 +2,7 @@
 //   node smoke.mjs a        speech in -> audio/transcripts out, point_at tool, interruption flush, injection experiments
 //   node smoke.mjs b        >2 minute audio+video session survives (compression), then forced drop + handover resume
 // Asserts print PASS/FAIL lines; exit code 1 on any FAIL. API calls are frugal: one session per mode.
-import { fakeDesktopJpeg, fakeMic, fakeSpeaker, loadLive, log, mintAuth, recordEvents, sleep, speech, TEST_SYSTEM_INSTRUCTION, waitFor } from './harness.mjs'
+import { fakeDesktopJpeg, fakeMic, fakeSpeaker, loadLive, log, mintAuth, realSystemInstruction, recordEvents, sleep, speech, TEST_SYSTEM_INSTRUCTION, waitFor } from './harness.mjs'
 
 const mode = process.argv[2] ?? 'a'
 const live = await loadLive()
@@ -29,7 +29,7 @@ function makeSession(extra = {}) {
       if (signal.aborted) throw new Error('cancelled')
       if (call.name === 'point_at') {
         const t = String(call.args.target ?? '').toLowerCase()
-        return /frobnic/.test(t) ? { found: false, confidence: 0.05, note: 'not visible' } : { found: true, confidence: 0.93 }
+        return /dino|frobnic|frog/.test(t) ? { found: false, confidence: 0.05, note: 'not visible' } : { found: true, confidence: 0.93 }
       }
       return { ok: true }
     },
@@ -145,7 +145,7 @@ async function modeA() {
 
   // ---- T5: INTERRUPT scheduling on a failed point_at ----
   log('--- T5: failed point_at -> INTERRUPT scheduling makes the model speak')
-  const q6 = speech('q6', 'Can you show me where the Frobnicate button is on the screen?')
+  const q6 = speech('q6', 'Can you show me where the dinosaur icon is on the screen?')
   const s6 = Date.now()
   await mic.say(q6, { leadMs: 200 })
   await waitFor(session, 'toolDone', (d) => d.name === 'point_at', 25_000).catch(() => undefined)
@@ -231,6 +231,53 @@ async function modeB() {
 }
 
 // Quick resumption/handover check (no 2-minute wait).
+async function modeT5() {
+  const { mic, speaker, session } = makeSession()
+  const rec = recordEvents(session)
+  session.on('transcript', (t) => t.final && log(`  [${t.role}]`, t.text))
+  session.on('toolCall', (c) => log('  toolCall', c.name, JSON.stringify(c.args)))
+  session.on('toolDone', (d) => log('  toolDone', d.name, `${d.ms}ms`))
+  await session.start({ voiceName: 'Charon' })
+  await sleep(1200)
+  const s6 = Date.now()
+  await mic.say(speech('q6', 'Can you show me where the dinosaur icon is on the screen?'), { leadMs: 200 })
+  await waitFor(session, 'toolDone', (d) => d.name === 'point_at', 25_000).catch(() => undefined)
+  await sleep(9000) // the INTERRUPT-scheduled reaction to found:false arrives as its own turn after the tool result
+  await waitFor(session, 'state', (s) => s.phase === 'live', 30_000).catch(() => undefined)
+  const said = lastAssistantText(rec, s6)
+  check('T5 model reacts to found:false (INTERRUPT scheduling)', /can.?t|cannot|not (see|find)|don.?t see|unable|no .*icon|isn.?t/i.test(said), JSON.stringify(said).slice(0, 220))
+  await session.stop('stop')
+}
+
+// P0 regression (QA): a silent session with real screen frames and the REAL teaching prompt must not make the assistant speak
+// unprompted, and must end on its own ~20 s after the learner went quiet.
+async function modeIdle() {
+  const si = await realSystemInstruction('marcus')
+  log('real system instruction chars', si.length)
+  let n = 0
+  const frames = { grab: async () => ({ jpegBase64: fakeDesktopJpeg(n++ % 6), changeScore: 0.2 }) } // a changing screen, every second
+  const { session, speaker, mic } = makeSession({ frames, idleTimeoutMs: 0 })
+  session.opts.host.systemInstruction = async () => si
+  const rec = recordEvents(session)
+  session.on('transcript', (t) => t.final && log(`  [${t.role}]`, t.text.slice(0, 120)))
+  session.on('notice', (x) => log('  notice', x.kind))
+  await session.start({ voiceName: 'Charon' })
+  const t0 = Date.now()
+  log('--- 45 s of silence (idle timeout disabled) with 1 fps changing frames: the model must stay quiet')
+  await sleep(45_000)
+  const spoke = speaker.bytes > 0
+  const sawAssistantText = rec.events.some((e) => e.name === 'transcript' && e.p.role === 'assistant')
+  check('IDLE-1 no unprompted speech during 45 s of silence with changing frames', !spoke && !sawAssistantText, `audio bytes ${speaker.bytes}, assistant lines ${rec.events.filter((e) => e.name === 'transcript' && e.p.role === 'assistant').length}`)
+  log('--- enabling the 20 s idle timeout now')
+  const t1 = Date.now()
+  session.setIdleTimeout(20_000)
+  const ended = await waitFor(session, 'ended', () => true, 30_000).then((e) => e, () => null)
+  check('IDLE-2 session ends by itself ~20 s after the last learner activity', !!ended && ended.reason === 'idle', ended ? `reason=${ended.reason} after ${((Date.now() - t1) / 1000).toFixed(1)}s` : 'did not end')
+  log(`frames sent=${session.frameLoop?.stats.sent}`)
+  if (!ended) await session.stop('stop')
+  void mic; void t0
+}
+
 async function modeC() {
   const s = makeSession({ log: (...a) => log('  [conn]', ...a) })
   const sess = s.session
@@ -262,7 +309,9 @@ async function modeC() {
 }
 
 try {
-  if (mode === 'c') await modeC()
+  if (mode === 'idle') await modeIdle()
+  else if (mode === 't5') await modeT5()
+  else if (mode === 'c') await modeC()
   else if (mode === 'a') await modeA()
   else if (mode === 'b') await modeB()
   else throw new Error('mode must be a|b')

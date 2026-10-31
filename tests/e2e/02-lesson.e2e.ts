@@ -1,7 +1,7 @@
 // (b) Full lesson run for video_call: start_lesson -> steps -> verify/step_done -> end_lesson -> profile -> higher level next attempt.
 // With real services the learner's actions are simulated by moving the demo-stage to the state after each step (needs --visible).
 import { beforeAll, describe, expect, it } from 'vitest'
-import { REAL, VISIBLE, clearInjectLog, clearOverlayLog, dbg, dev, injectLog, overlayLog, resetApp, sleep, state, tool, waitFor } from './helpers'
+import { REAL, VISIBLE, clearInjectLog, clearOverlayLog, dbg, dev, injectLog, overlayLog, resetApp, saveShots, sleep, state, tool, waitFor } from './helpers'
 
 interface LearnerAttemptView {
   skillId: string
@@ -11,6 +11,7 @@ interface LearnerAttemptView {
 
 const canDriveStage = !REAL || VISIBLE
 const SCREEN_REAL = REAL && VISIBLE
+const STAGE_STEPS = 5 // steps in the stage's video_call flow
 
 async function learner() {
   return (await dev<{ skills: Record<string, { level: number; streakClean: number }>; attempts: LearnerAttemptView[] }>('/dev/learner')).body
@@ -27,19 +28,38 @@ async function runCleanAttempt(label: string): Promise<{ steps: number; levelBef
   const s0 = await state()
   expect(s0.skill?.step).toBe(1)
   expect(s0.skill?.stepCount).toBe(started.result.stepCount)
+  await sleep(1500)
+  await saveShots(`lesson-${label.replace(/\s+/g, '-')}-step1`)
 
   let ticks = 0
+  // The learner sees the direction (ring/ghost) first, then acts; wait for it like a person would.
+  const drawn = async () => (await overlayLog()).filter((o) => o.op === 'show').flatMap((o) => o.annotations ?? []).filter((a) => ['ring', 'ghostCursor', 'spotlight'].includes(a.kind)).length
+  let seenDrawn = 0
+  const waitForDirection = async (what: string) => {
+    seenDrawn = await waitFor(what, async () => ((await drawn()) > seenDrawn ? await drawn() : null), 12_000, 200).catch(() => seenDrawn)
+  }
+  await waitForDirection('first direction drawn')
   for (let i = 1; i <= started.result.stepCount; i++) {
-    if (SCREEN_REAL) await dev('/dev/stage/call', { fn: 'setStep', args: ['video_call', i] }) // the learner did the step
-    const verdict = await tool<{ completed: boolean; confidence: number }>('verify_step', { expected_outcome: 'the step is done' })
+    if (SCREEN_REAL) await dev('/dev/stage/call', { fn: 'setStep', args: ['video_call', Math.min(i, STAGE_STEPS)] }) // the learner did the step
+    const stepBefore = (await state()).skill?.step
+    const verdict = await tool<{ completed: boolean; confidence: number; evidence?: string }>('verify_step', { expected_outcome: 'the step is done' })
     expect(verdict.result.error, `${label}: verify step ${i}`).toBeUndefined()
-    expect(verdict.result.completed, `${label}: step ${i} verdict`).toBe(true)
-    const done = await tool<{ ok: boolean; done: boolean }>('step_done', {})
-    expect(done.result.ok, `${label}: step_done ${i}`).toBe(true)
-    if (i < started.result.stepCount && done.result.done) break
+    expect(verdict.result.completed, `${label}: step ${i} verdict (${verdict.result.evidence ?? ''})`).toBe(true)
+    // The real runner advances on a verified step by itself; the mock needs step_done.
+    const stepAfter = (await state()).skill?.step
+    if (stepAfter !== undefined && stepAfter === stepBefore) {
+      const done = await tool<{ ok: boolean; done: boolean }>('step_done', {})
+      expect(done.result.ok, `${label}: step_done ${i}`).toBe(true)
+    }
+    if ((await state()).skill) await waitForDirection(`direction drawn for step ${i + 1}`)
+    if (i === 2) await saveShots(`lesson-${label.replace(/\s+/g, '-')}-step2-verified`)
+    if (!(await state()).skill) break // lesson finished
   }
   const log = await overlayLog()
-  ticks = log.filter((o) => o.op === 'show').flatMap((o) => o.annotations ?? []).filter((a) => a.kind === 'tick').length
+  const kinds: Record<string, number> = {}
+  for (const a of log.filter((o) => o.op === 'show').flatMap((o) => o.annotations ?? [])) kinds[a.kind] = (kinds[a.kind] ?? 0) + 1
+  console.log(`[e2e] ${label}: annotations shown ${JSON.stringify(kinds)}`)
+  ticks = kinds.tick ?? 0
   const ended = await tool<{ ok: boolean }>('end_lesson', { summary: `Joined a video call (${label}).`, teachBackScore: 0.9, confidence: 4 })
   expect(ended.result.ok).toBe(true)
   await sleep(300)
@@ -97,8 +117,12 @@ describe.skipIf(!canDriveStage)('video_call lesson', () => {
     await waitFor('session active', async () => ['connecting', 'live', 'thinking', 'speaking'].includes((await state()).phase), 5000, 100)
     await tool('start_lesson', { goal: 'Join a video call' })
     await waitFor('lesson active', async () => (await state()).skill)
+    const t0 = Date.now()
     await dbg('/stop', {})
-    await waitFor('lesson aborted', async () => !(await state()).skill)
+    await waitFor('lesson aborted', async () => !(await state()).skill, 20_000, 100)
+    const took = Date.now() - t0
+    console.log(`[e2e] Stop cleared the lesson in ${took} ms`)
+    expect(took, 'Stop must clear the lesson promptly').toBeLessThan(4000)
     expect((await overlayLog()).some((o) => o.op === 'clear')).toBe(true)
   })
 })

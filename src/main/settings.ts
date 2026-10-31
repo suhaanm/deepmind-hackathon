@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { coerceSettings, DEFAULT_SETTINGS, SettingsSchema } from '../shared/settings'
+import { coerceSettings, DEFAULT_SETTINGS, reconcileAgency, SettingsSchema } from '../shared/settings'
 import type { Settings, SettingsPatch } from '../shared/settings'
 
 type Listener = (settings: Settings, patch: SettingsPatch) => void
@@ -40,8 +40,8 @@ export class SettingsStore {
         if (parsed.success) accepted[key] = parsed.data
       }
     }
-    const patch = accepted as SettingsPatch
-    if (Object.keys(patch).length === 0) return this.current
+    if (Object.keys(accepted).length === 0) return this.current
+    const patch = reconcileAgency(this.current, accepted as SettingsPatch)
     this.current = { ...this.current, ...patch }
     this.scheduleSave()
     for (const listener of this.listeners) listener(this.current, patch)

@@ -169,7 +169,7 @@ describe('read-only guarantees', () => {
     await rt.spawn('lookup', 'q')
     await rt.spawn('lesson_summary', 's')
     await until(() => rt.list().every((c) => c.status !== 'running'))
-    const allowed = /^(capture\.grab:ground|grounder\.ground:|scam\.analyze|model\.searchAnswer|model\.extractMessage)/
+    const allowed = /^(capture\.grab:ground|grounder\.ground:|scam\.analyze|model\.searchAnswer)/
     for (const call of f.calls) expect(call).toMatch(allowed)
     // Overlay: only show/clear of highlights, never captions or chips (the fake has no other methods to call).
     expect(Object.keys(f.deps.overlay).sort()).toEqual(['clear', 'show'])

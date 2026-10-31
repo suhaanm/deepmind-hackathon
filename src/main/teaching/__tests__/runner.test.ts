@@ -16,8 +16,8 @@ import { DEFAULT_SETTINGS } from '../../../shared/settings'
 import type { Settings } from '../../../shared/settings'
 import { TeachingLearnerStore } from '../learner-store'
 import { levelEngine } from '../levels'
-import { LessonRunnerImpl, UnsupportedGoalError } from '../runner'
-import type { Clock } from '../runner'
+import { LessonRunnerImpl } from '../runner'
+import type { Clock, RunnerConfig } from '../runner'
 import { pickSkill } from '../skills/definitions'
 import { fallbackPlan } from '../skills/plans'
 
@@ -75,18 +75,19 @@ interface Rig {
   watch: { fire(score?: number): void; subs: number }
   verdicts: Verdict[]
   verifyCalls: number
-  groundCalls: { target: string; hasShot: boolean }[]
+  groundCalls: { target: string; hasShot: boolean; precise?: boolean }[]
   prefetchCalls: string[]
+  prefetchPrecise: (boolean | undefined)[]
   grabs: string[]
   groundResult: { current: GroundResult | null; delay: Promise<void> | null }
-  architect: { impl: LessonArchitect['plan'] }
+  architect: { impl: LessonArchitect['plan']; calls: Parameters<LessonArchitect['plan']>[0][] }
   settings: Settings
   last(n?: number): string
   settle(): Promise<void>
   sawShown(id: string): boolean
 }
 
-function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; stateLevel?: HelpLevel } = {}): Rig {
+function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; stateLevel?: HelpLevel; config?: Partial<RunnerConfig> } = {}): Rig {
   const clock = new FakeClock()
   const settings: Settings = { ...DEFAULT_SETTINGS, ...opts.settings }
   const injects: string[] = []
@@ -97,6 +98,7 @@ function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; state
   const verdicts: Verdict[] = []
   const groundCalls: Rig['groundCalls'] = []
   const prefetchCalls: string[] = []
+  const prefetchPrecise: (boolean | undefined)[] = []
   const grabs: string[] = []
   const groundResult: Rig['groundResult'] = {
     current: { found: true, box: BOX, point: undefined, confidence: 0.9, label: 'x', latencyMs: 5, model: 'fake' },
@@ -134,20 +136,20 @@ function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; state
       return verdicts.shift() ?? NOT_YET
     },
   }
-  const architect = { impl: (async (req) => fallbackPlan(pickSkill(req.goal) ?? 'video_call', req.goal)) as LessonArchitect['plan'] }
+  const architect = { impl: (async (req) => fallbackPlan(pickSkill(req.goal) ?? 'video_call', req.goal)) as LessonArchitect['plan'], calls: [] as Parameters<LessonArchitect['plan']>[0][] }
   const grounder = {
-    async ground(req: { target: string; shot?: unknown }): Promise<GroundResult> {
-      groundCalls.push({ target: req.target, hasShot: req.shot !== undefined })
+    async ground(req: { target: string; shot?: unknown; precise?: boolean }): Promise<GroundResult> {
+      groundCalls.push({ target: req.target, hasShot: req.shot !== undefined, precise: req.precise })
       if (groundResult.delay) await groundResult.delay
       return groundResult.current ?? { found: false, confidence: 0.1, latencyMs: 1, model: 'fake', reason: 'not sure' }
     },
-    ...(opts.prefetch ? { prefetch: (r: { target: string }) => void prefetchCalls.push(r.target) } : {}),
+    ...(opts.prefetch ? { prefetch: (r: { target: string; precise?: boolean }) => (prefetchCalls.push(r.target), void prefetchPrecise.push(r.precise)) } : {}),
   }
   const runner = new LessonRunnerImpl({
     capture,
     grounder,
     verifier,
-    architect: { plan: (req) => architect.impl(req) },
+    architect: { plan: (req) => (architect.calls.push(req), architect.impl(req)) },
     overlay: {
       show: (a) => void shown.push(a),
       clear: (ids) => void cleared.push(ids),
@@ -166,9 +168,10 @@ function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; state
     },
     getSettings: () => settings,
     clock,
+    config: opts.config,
   })
   const rig: Rig = {
-    clock, runner, store, injects, shown, cleared, levelEvents, stepEvents, state, watch: watch as never, verdicts, verifyCalls: 0, groundCalls, prefetchCalls, grabs,
+    clock, runner, store, injects, shown, cleared, levelEvents, stepEvents, state, watch: watch as never, verdicts, verifyCalls: 0, groundCalls, prefetchCalls, prefetchPrecise, grabs,
     groundResult, architect, settings,
     last: (n = 1) => injects.slice(-n).join(' || '),
     settle: async () => {
@@ -212,7 +215,7 @@ describe('happy path at level 2', () => {
     expect(rig.injects[0]).toContain('lesson "Start a video call" started')
     expect(rig.injects[0]).toContain('step 1 of 5, level 2 "Walk with me"')
     const first = rig.shown[0]
-    expect(first.map((a) => a.kind).sort()).toEqual(['arrow', 'badge', 'ring'])
+    expect(first.map((a) => a.kind).sort()).toEqual(['arrow', 'ring'])
     expect(first.find((a) => a.kind === 'ring')).toMatchObject({ box: BOX, step: 1 })
 
     for (let i = 1; i <= 4; i++) {
@@ -265,6 +268,24 @@ describe('happy path at level 2', () => {
     expect(rig.prefetchCalls.at(-1)).toContain('Lily')
     await rig.clock.advance(1_600)
     await rig.settle()
+  })
+
+  it('grounds and prefetches EVERY step precisely, and warms step 1 the moment start_lesson begins', async () => {
+    rig = makeRig({ prefetch: true })
+    await rig.runner.start('I want to call Lily')
+    // before the first tick: step 1's target is already being fetched, precisely
+    expect(rig.prefetchCalls).toHaveLength(1)
+    expect(rig.prefetchCalls[0]).toContain('VideoChat')
+    await rig.clock.advance(0)
+    await rig.settle()
+    rig.watch.fire()
+    await rig.clock.advance(1_600)
+    await actAndVerify(rig)
+    await actAndVerify(rig)
+    expect(rig.prefetchPrecise.length).toBeGreaterThan(2)
+    expect(rig.prefetchPrecise.every((p) => p === true)).toBe(true)
+    expect(rig.groundCalls.length).toBeGreaterThan(0)
+    expect(rig.groundCalls.every((g) => g.precise === true)).toBe(true)
   })
 
   it('hands the grounder a shot when it has no prefetch', async () => {
@@ -507,51 +528,166 @@ describe('stall ladder', () => {
   })
 })
 
-describe('plan: Argon with a hard timeout and a static fallback', () => {
-  it('uses the architect plan when it answers in time', async () => {
-    await rig.store.setSkillLevel('bigger_text', 2)
-    const custom: LessonPlan = { ...fallbackPlan('bigger_text', 'bigger'), lessonId: 'argon-1', steps: fallbackPlan('bigger_text').steps.slice(0, 2).map((s) => ({ ...s, instruction: 'Please go and open the Settings application using the grey gear icon on the left hand side of your screen right now thanks' })) }
-    rig.architect.impl = async () => custom
-    const res = await startLesson(rig, 'make the text bigger')
-    expect(res).toEqual({ lessonId: 'argon-1', skillId: 'bigger_text', stepCount: 2 })
-    expect(rig.injects[0]).toMatch(/Tell the learner|ghost cursor|level/)
-    // instructions are capped at 20 words
-    expect(rig.injects[0].split('"').some((s) => s.startsWith('Please go and open') && s.split(' ').length <= 20)).toBe(true)
+const mutePlan = (): LessonPlan => ({
+  lessonId: 'argon-mute',
+  skillId: 'bigger_text', // Argon's guess is ignored: novel goals are one generic "custom" skill
+  goal: 'ignored',
+  steps: [
+    {
+      id: 'mute.find',
+      index: 0,
+      instruction: 'Find the microphone button in the bar at the bottom of the call.',
+      targetDescription: 'round microphone button in the bottom control bar of the call screen',
+      expectedOutcome: 'The microphone button is highlighted',
+      hints: { l1: 'The microphone is the round button on the left of the bottom bar.', l2: 'Look at the bottom bar for the microphone.', l3: 'Bottom of the call window.' },
+      safetyCritical: false,
+    },
+    {
+      id: 'mute.press',
+      index: 1,
+      instruction: 'Click the microphone button once to mute yourself. Please go and do this slowly and calmly right now thanks very much indeed.',
+      targetDescription: 'round microphone button in the bottom control bar of the call screen',
+      expectedOutcome: 'The microphone icon has a red line through it',
+      hints: { l1: 'One click mutes you.', l2: 'Click the microphone once.', l3: 'The same round button.' },
+      safetyCritical: false,
+    },
+  ],
+})
+
+describe('plan: built-in skills start instantly, novel goals are planned by Argon from the screen', () => {
+  it('a built-in goal starts at once from its static plan: no architect call, no screenshot, no waiting', async () => {
+    const res = await rig.runner.start('I want to call Lily')
+    expect(res).toMatchObject({ skillId: 'video_call', stepCount: 5 })
+    expect(res.lessonId).toMatch(/^fallback-video_call/)
+    expect(rig.architect.calls).toHaveLength(0)
+    expect(rig.grabs).toHaveLength(0)
+    expect(rig.injects).toHaveLength(0) // nothing before the first step direction
+    await rig.clock.advance(0)
+    await rig.settle()
+    expect(rig.injects[0]).toContain('step 1 of 5')
   })
 
-  it('falls back after 8 s when Argon hangs', async () => {
+  it.each([
+    ['is this text a scam?', 'spot_scam'],
+    ['make the text bigger', 'bigger_text'],
+  ])('%s -> %s without Argon', async (goal, skill) => {
+    expect((await rig.runner.start(goal)).skillId).toBe(skill)
+    expect(rig.architect.calls).toHaveLength(0)
+  })
+
+  it('a novel goal: keeps the model talking, plans from the live screenshot, runs as the generic custom skill', async () => {
+    rig.architect.impl = async () => mutePlan()
+    const res = await rig.runner.start('how do I mute myself?')
+    expect(rig.injects[0]).toContain('The learner asked for something new: "how do I mute myself?"')
+    expect(rig.injects[0]).toContain('Do not guess any steps yet')
+    expect(rig.architect.calls).toHaveLength(1)
+    expect(rig.architect.calls[0]).toMatchObject({ goal: 'how do I mute myself?' })
+    expect(rig.architect.calls[0].shot).toBeDefined()
+    expect(rig.grabs[0]).toBe('ground')
+    expect(res).toEqual({ lessonId: 'argon-mute', skillId: 'custom', stepCount: 2 })
+    await rig.clock.advance(0)
+    await rig.settle()
+    expect(rig.state.cur.skill).toMatchObject({ id: 'custom', name: 'how do I mute myself?', step: 1, stepCount: 2 })
+    expect(rig.state.cur.level).toBe(1) // a brand-new generic skill starts at Watch me
+    const direction = rig.injects.find((t) => t.includes('step 1 of 2'))!
+    expect(direction).toContain('lesson "how do I mute myself?" started')
+    expect(rig.shown[0].map((a) => a.kind)).toContain('ghostCursor')
+    await actAndVerify(rig)
+    await actAndVerify(rig)
+    expect(rig.last()).toContain('teach-back')
+    expect(rig.last()).toContain('Find the microphone button') // the rubric for a custom lesson is its own steps
+    // instructions from Argon are capped at 20 words
+    expect(rig.injects.some((t) => t.includes('indeed'))).toBe(false)
+    await rig.runner.end('Learned how to mute. Confidence 5.', 0.9, 5)
+    const snap = rig.store.snapshot()
+    expect(snap.skills.custom).toBeDefined()
+    expect(snap.skills.custom?.level).toBe(2)
+    expect(snap.attempts[0]).toMatchObject({ skillId: 'custom', completed: true, clean: true })
+    expect(snap.lastSession?.summary).toBe('Learned how to mute.')
+    expect(rig.store.snapshot().skills.video_call.level).toBe(1) // built-in levels untouched
+  })
+
+  it('an architect plan reuses the architect\'s own step-1 grounding (not precise, no new prefetch); later steps are precise', async () => {
+    rig = makeRig({ prefetch: true })
+    rig.architect.impl = async () => mutePlan()
+    await rig.runner.start('how do I mute myself?')
+    expect(rig.prefetchCalls).toHaveLength(0)
+    await rig.clock.advance(0)
+    await rig.settle()
+    expect(rig.groundCalls[0].precise).toBe(false)
+    expect(rig.prefetchCalls).toHaveLength(0)
+    rig.verdicts.push(OK)
+    rig.watch.fire() // warms step 2 precisely
+    expect(rig.prefetchPrecise.at(-1)).toBe(true)
+    await rig.clock.advance(1_600)
+    await rig.settle()
+    expect(rig.groundCalls.slice(1).every((g) => g.precise === true)).toBe(true)
+  })
+
+  it('the custom skill shows up in the profile file and the built-ins stay put', async () => {
+    rig.architect.impl = async () => mutePlan()
+    await startLesson(rig, 'how do I mute myself?')
+    await actAndVerify(rig)
+    await actAndVerify(rig)
+    await rig.runner.end('done', 1)
+    const text = (await rig.store.editMarkdown({ op: 'read' })).content
+    expect(text).toContain('| Something new |')
+    expect(text).not.toContain('Start a video call')
+  })
+
+  it('Argon taking too long: honest pointer fallback after 15 s, never a built-in lesson', async () => {
     rig.architect.impl = () => new Promise(() => undefined)
     let result: { lessonId: string; skillId: SkillId; stepCount: number } | null = null
-    const p = rig.runner.start('call Lily').then((r) => (result = r))
+    const p = rig.runner.start('how do I mute myself?').then((r) => (result = r))
     await flush()
-    await rig.clock.advance(7_999)
+    await rig.clock.advance(14_999)
     expect(result).toBeNull()
     await rig.clock.advance(1)
     await p
-    expect(result).toMatchObject({ skillId: 'video_call', stepCount: 5 })
-    expect((result as unknown as { lessonId: string }).lessonId).toMatch(/^fallback-video_call/)
+    expect(result).toMatchObject({ skillId: 'custom', stepCount: 1 })
+    expect((result as unknown as { lessonId: string }).lessonId).toMatch(/^pointer-/)
+    await rig.clock.advance(0)
+    await rig.settle()
+    expect(rig.injects.some((t) => t.includes('could not be worked out in time') && t.includes('step 1 of 1'))).toBe(true)
+    expect(rig.state.cur.skill?.stepCount).toBe(1)
+    // the one step looks for exactly what was asked about
+    expect(rig.groundCalls[0].target).toBe('how do I mute myself?')
   })
 
-  it('falls back when Argon rejects or returns junk', async () => {
+  it('Argon failing or returning junk also ends in the pointer, not a wrong lesson', async () => {
     rig.architect.impl = async () => {
       throw new Error('503')
     }
-    expect((await rig.runner.start('is this a scam?')).lessonId).toMatch(/^fallback-spot_scam/)
+    expect(await rig.runner.start('help me with my email')).toMatchObject({ skillId: 'custom', stepCount: 1 })
     rig.architect.impl = (async () => ({ nonsense: true })) as never
-    expect((await rig.runner.start('make the text bigger')).lessonId).toMatch(/^fallback-bigger_text/)
+    expect(await rig.runner.start('how do I attach a photo?')).toMatchObject({ skillId: 'custom', stepCount: 1 })
   })
 
-  it('an unrelated goal with no plan is a clear error', async () => {
-    rig.architect.impl = async () => {
-      throw new Error('503')
+  it('no screenshot (no screen access) still lets the architect try; then points', async () => {
+    ;(rig.runner as unknown as { deps: { capture: Capture } }).deps.capture = {
+      grab: async () => {
+        throw new Error('no screen access')
+      },
+      liveFrame: async () => ({ jpegBase64: '', changeScore: 0 }),
+      watch: () => () => undefined,
     }
-    await expect(rig.runner.start('bake me a cake')).rejects.toBeInstanceOf(UnsupportedGoalError)
-    expect(rig.runner.running).toBe(false)
+    rig.architect.impl = async () => {
+      throw new Error('needs a screenshot')
+    }
+    const res = await rig.runner.start('how do I mute myself?')
+    expect(res.skillId).toBe('custom')
+    expect(rig.architect.calls[0].shot).toBeUndefined()
   })
 
-  it('an architect plan can rescue a goal the keywords missed', async () => {
-    rig.architect.impl = async () => fallbackPlan('video_call', 'speak to my daughter')
-    expect((await rig.runner.start('speak to my daughter please')).skillId).toBe('video_call')
+  it('ALONGSIDE_PLAN_TIMEOUT_MS style override shortens the wait', async () => {
+    rig = makeRig({ config: { planTimeoutMs: 3_000 } })
+    rig.architect.impl = () => new Promise(() => undefined)
+    let done = false
+    const p = rig.runner.start('how do I mute myself?').then(() => (done = true))
+    await flush()
+    await rig.clock.advance(3_000)
+    await p
+    expect(done).toBe(true)
   })
 
   it('starting a new lesson replaces the old one cleanly', async () => {
@@ -631,6 +767,94 @@ describe('abort', () => {
   })
 })
 
+describe('a model that calls both step_done and verify_step is not double-stepped', () => {
+  it('step_done / verify_step right after the app advanced acknowledge that step instead of checking the next', async () => {
+    await startLesson(rig)
+    await actAndVerify(rig) // the watcher verified step 1 and moved on
+    const calls = rig.verifyCalls
+    rig.verdicts.push(OK) // would wrongly complete step 2 if consulted
+    const done = await rig.runner.onStepDone()
+    expect(done).toMatchObject({ ok: true, done: false, step: { index: 1 } })
+    expect((await rig.runner.verifyStep()).completed).toBe(true)
+    expect(rig.verifyCalls).toBe(calls)
+    expect(rig.state.cur.skill?.step).toBe(2)
+    // later (outside the window) an explicit step_done checks for real
+    await rig.clock.advance(4_000)
+    expect(await rig.runner.onStepDone()).toMatchObject({ ok: true, step: { index: 2 } })
+    expect(rig.state.cur.skill?.step).toBe(3)
+  })
+})
+
+describe('goodbye / Stop mid-lesson leaves the profile consistent', () => {
+  const profile = async (r: Rig): Promise<string> => (await r.store.editMarkdown({ op: 'read' })).content
+
+  it('abort at any point records nothing: the profile file is byte-identical, state is clean', async () => {
+    await rig.store.setSkillLevel('video_call', 3, { lastSeen: rig.clock.now() - 1000 })
+    const before = await profile(rig)
+    const phase = rig.state.cur.phase
+    await startLesson(rig)
+    await rig.clock.advance(8_000) // glow
+    await rig.clock.advance(6_000) // clue
+    rig.verdicts.push({ completed: false, confidence: 0.9, evidence: 'x', uncertain: false, learnerMisstep: 'wrong' })
+    rig.watch.fire()
+    await rig.clock.advance(1_600)
+    await rig.runner.abort('session ended: goodbye')
+    expect(await profile(rig)).toBe(before)
+    expect(rig.store.snapshot().attempts).toEqual([])
+    expect(rig.state.cur.skill).toBeUndefined()
+    expect(rig.state.cur.phase).toBe(phase) // the runner never touches the session phase
+    expect(rig.state.cur.level).toBe(3) // chip back to the saved level
+    expect(rig.clock.pending()).toBe(0)
+    expect(rig.watch.subs).toBe(0)
+  })
+
+  it('Stop during step set-up, while a verification is in flight, and twice in a row', async () => {
+    await startLesson(rig)
+    let release!: (v: Verdict) => void
+    ;(rig.runner as unknown as { deps: { verifier: Verifier } }).deps.verifier = { verify: () => new Promise<Verdict>((r) => (release = r)) }
+    rig.watch.fire()
+    await rig.clock.advance(1_600)
+    await Promise.all([rig.runner.abort('stop'), rig.runner.abort('stop')])
+    release(OK)
+    await flush()
+    expect(rig.runner.running).toBe(false)
+    expect(rig.state.cur.skill).toBeUndefined()
+    expect(rig.store.snapshot().attempts).toEqual([])
+    expect(rig.stepEvents.filter((e) => e.phase === 'aborted')).toHaveLength(1)
+  })
+
+  it('Stop while Argon is still planning a novel goal: nothing starts afterwards', async () => {
+    let release!: (p: LessonPlan) => void
+    rig.architect.impl = () => new Promise<LessonPlan>((r) => (release = r))
+    const started = rig.runner.start('how do I mute myself?')
+    const outcome = started.then(() => 'started', (e: Error) => e.message)
+    await flush()
+    await rig.runner.abort('session ended: stop')
+    release(mutePlan())
+    await rig.clock.advance(0)
+    await rig.settle()
+    expect(await outcome).toMatch(/cancelled/)
+    expect(rig.runner.running).toBe(false)
+    expect(rig.state.cur.skill).toBeUndefined()
+    expect(rig.watch.subs).toBe(0)
+    expect(rig.clock.pending()).toBe(0)
+    expect(rig.store.snapshot().attempts).toEqual([])
+    // and a fresh lesson still works afterwards
+    rig.architect.impl = async () => mutePlan()
+    expect((await rig.runner.start('how do I mute myself?')).skillId).toBe('custom')
+    await rig.runner.abort('x')
+  })
+
+  it('Stop after the last step but before end_lesson still keeps the finished attempt, once', async () => {
+    await rig.store.setSkillLevel('bigger_text', 2)
+    await startLesson(rig, 'make the text bigger')
+    for (let i = 0; i < 3; i++) await actAndVerify(rig)
+    await Promise.all([rig.runner.abort('goodbye'), rig.runner.abort('goodbye')])
+    expect(rig.store.snapshot().attempts).toHaveLength(1)
+    expect(rig.runner.running).toBe(false)
+  })
+})
+
 describe('fading across attempts (the demo moment)', () => {
   async function runClean(rig: Rig, goal: string, steps: number, score = 0.9): Promise<void> {
     await startLesson(rig, goal)
@@ -691,15 +915,63 @@ describe('fading across attempts (the demo moment)', () => {
 })
 
 describe('safety floor and level 4', () => {
-  it('a safety-critical step is lifted to L2 even for a learner at L4, then the chip returns', async () => {
+  it('a lesson with a safety-critical step never runs untracked: L4 is held at L3, the safety step is lifted to L2', async () => {
     await rig.store.setSkillLevel('spot_scam', 4)
     await startLesson(rig, 'is this text a scam?')
-    expect(rig.sawShown('runner-ring')).toBe(false) // step 1 is silent at L4
-    // L4: screen changes are not checked, only on request
+    expect(rig.state.cur.level).toBe(3)
+    expect(rig.levelEvents.at(-1)?.reason).toBe('this lesson keeps a safety net')
+    expect(rig.sawShown('runner-ring')).toBe(false) // L3 draws nothing until a stall
+    await actAndVerify(rig)
+    await actAndVerify(rig) // steps are still tracked, so the safety step is reached
+    expect(rig.state.cur.skill?.step).toBe(3)
+    expect(rig.last()).toContain('safety-critical')
+    expect(rig.sawShown('runner-ring')).toBe(true)
+    expect(rig.levelEvents.some((e) => e.scope === 'step' && e.to === 2)).toBe(true)
+    await actAndVerify(rig)
+    expect(rig.levelEvents.at(-1)).toMatchObject({ scope: 'step', to: 3 })
+    expect(rig.state.cur.level).toBe(3)
+  })
+
+  it('the in-lesson fade stops at L3 on a lesson with a safety-critical step', async () => {
+    await rig.store.setSkillLevel('spot_scam', 3)
+    await startLesson(rig, 'is this text a scam?')
+    await actAndVerify(rig)
+    await actAndVerify(rig)
+    expect(rig.levelEvents.filter((e) => e.scope === 'attempt')).toHaveLength(0)
+    expect(rig.state.cur.skill?.step).toBe(3)
+    expect(rig.levelEvents.some((e) => e.scope === 'step' && e.to === 2)).toBe(true)
+  })
+
+  it('L4 on a lesson without safety steps: silent, no per-step tracking, a silent check for the finished task', async () => {
+    await rig.store.setSkillLevel('video_call', 4)
+    await startLesson(rig)
+    expect(rig.state.cur.level).toBe(4)
+    expect(rig.injects[0]).toContain('Stay silent')
+    expect(rig.groundCalls).toHaveLength(0)
+    const before = rig.injects.length
+    // the learner is part way through: the check finds the task unfinished and says nothing
+    rig.verdicts.push(NOT_YET)
     rig.watch.fire()
-    await rig.clock.advance(5_000)
-    expect(rig.verifyCalls).toBe(0)
-    // step_done at L4 means "I finished the whole task": verified against the end state
+    await rig.clock.advance(1_600)
+    await rig.settle()
+    expect(rig.verifyCalls).toBe(1)
+    expect(rig.injects).toHaveLength(before)
+    expect(rig.state.cur.skill?.step).toBe(1)
+    // the task is finished: the lesson completes by itself and the model is told to do the teach-back
+    rig.verdicts.push(OK)
+    rig.watch.fire()
+    await rig.clock.advance(4_000)
+    await rig.settle()
+    expect(rig.last()).toContain('teach-back')
+    expect(rig.watch.subs).toBe(0)
+    // explicit asks also check the whole task
+    await rig.runner.end('did it alone', 1)
+    expect(rig.store.snapshot().attempts[0]).toMatchObject({ completed: true, hintsUsed: 0, clean: true })
+  })
+
+  it('L4: step_done / verify_step mean "I finished": checked against the end state', async () => {
+    await rig.store.setSkillLevel('video_call', 4)
+    await startLesson(rig)
     rig.verdicts.push({ completed: false, confidence: 0.9, evidence: 'not there yet', uncertain: false })
     expect(await rig.runner.onStepDone()).toMatchObject({ ok: false, done: false })
     rig.verdicts.push(OK)
@@ -709,19 +981,21 @@ describe('safety floor and level 4', () => {
     expect(rig.store.snapshot().attempts[0]).toMatchObject({ completed: true, hintsUsed: 1 })
   })
 
-  it('step 3 of the scam lesson is safety-critical and gets help at L4', async () => {
-    await rig.store.setSkillLevel('spot_scam', 3)
-    await startLesson(rig, 'is this text a scam?')
-    rig.settings.demoMode = true
-    // L3 steps 1 and 2 verify silently by screen change
+  it('fading into L4 mid-lesson goes quiet: the chip moves, later steps are not announced', async () => {
+    await rig.store.setSkillLevel('video_call', 3)
+    await startLesson(rig)
     await actAndVerify(rig)
-    await actAndVerify(rig)
-    expect(rig.state.cur.skill?.step).toBe(3)
-    expect(rig.last()).toContain('safety-critical')
-    expect(rig.sawShown('runner-ring')).toBe(true)
-    expect(rig.levelEvents.some((e) => e.scope === 'step' && e.to === 2)).toBe(true)
-    await actAndVerify(rig)
-    expect(rig.levelEvents.at(-1)).toMatchObject({ scope: 'step', to: 4 }) // two clean steps had faded L3 -> L4; the floor only lifted step 3
+    await actAndVerify(rig) // two clean steps: L3 -> L4 for the rest
+    expect(rig.state.cur.level).toBe(4)
+    expect(rig.last()).toContain('level=4 "On my own"')
+    const n = rig.injects.length
+    await rig.clock.advance(5_000)
+    expect(rig.injects).toHaveLength(n)
+    rig.verdicts.push(OK)
+    rig.watch.fire()
+    await rig.clock.advance(4_000)
+    await rig.settle()
+    expect(rig.last()).toContain('teach-back') // end state reached
   })
 })
 
@@ -857,7 +1131,7 @@ describe('in-lesson adaptive fading (the hero moment)', () => {
     await rig.store.setSkillLevel('video_call', 2)
     await startLesson(rig)
     expect(rig.state.cur.level).toBe(2)
-    expect(rig.shown[0].map((a) => a.kind).sort()).toEqual(['arrow', 'badge', 'ring'])
+    expect(rig.shown[0].map((a) => a.kind).sort()).toEqual(['arrow', 'ring'])
 
     await actAndVerify(rig) // step 1 clean
     expect(rig.state.cur.level).toBe(2)

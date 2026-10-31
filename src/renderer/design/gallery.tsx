@@ -9,6 +9,7 @@ import type { AlongsideApi } from '../../shared/ipc'
 import { buildProgress } from '../../main/teaching/progress'
 import { Panel, type DockTab } from '../dock/Panel'
 import { ProfileTab } from '../dock/ProfileTab'
+import { chatBus } from '../dock/chat/bus'
 import { Pill } from '../dock/Pill'
 import {
   AgentTray, Captions, ConfirmModal, ErrorBanner, LevelChip, ListeningLight, MuteButton, Onboarding, PHASE_LABELS, PresenceOrb, ProgressView,
@@ -29,9 +30,9 @@ const snapshot: LearnerSnapshot = {
     bigger_text: { level: 1, streakClean: 0, lastSeen: null, nextReview: null },
   },
   confidenceLog: [2, 2, 3, 3, 3, 4, 4, 5].map((rating, i) => ({ at: now - (8 - i) * day, skillId: 'video_call' as const, rating })),
-  attempts, whatWorks: [], avoidJargon: [],
+  attempts, whatWorks: [], avoidJargon: [], doneForMe: { video_call: 2 },
 }
-const emptySnapshot: LearnerSnapshot = { ...snapshot, skills: { video_call: { level: 1, streakClean: 0, lastSeen: null, nextReview: null }, spot_scam: { level: 1, streakClean: 0, lastSeen: null, nextReview: null }, bigger_text: { level: 1, streakClean: 0, lastSeen: null, nextReview: null } }, confidenceLog: [], attempts: [] }
+const emptySnapshot: LearnerSnapshot = { ...snapshot, skills: { video_call: { level: 1, streakClean: 0, lastSeen: null, nextReview: null }, spot_scam: { level: 1, streakClean: 0, lastSeen: null, nextReview: null }, bigger_text: { level: 1, streakClean: 0, lastSeen: null, nextReview: null } }, confidenceLog: [], attempts: [], doneForMe: {} }
 
 // Panel's progress and profile tabs talk to main through the preload API; the gallery stands in for it.
 const profileSeed = `# My Alongside profile
@@ -105,6 +106,16 @@ const agents: AgentChip[] = [
   { id: 'a4', kind: 'lookup', title: 'Looking up the bank opening hours', status: 'cancelled', startedAt: now },
 ]
 
+// Seed the shared chat bus and answer typed turns with a canned echo, standing in for LIVE's transport.
+chatBus.push({ id: 'u1', role: 'user', text: 'How do I make the writing bigger?', final: true, at: now, via: 'voice' })
+chatBus.push({ id: 'a1', role: 'assistant', text: 'Let\u2019s do it together. Look for the gear icon in the top right.', final: true, at: now, via: 'voice' })
+let echoN = 0
+chatBus.onSend(() => {
+  const id = `a-echo-${echoN++}`
+  setTimeout(() => chatBus.push({ id, role: 'assistant', text: 'Sure. Take your time, I am here.', final: false, at: Date.now(), via: 'typed' }), 400)
+  setTimeout(() => chatBus.push({ id, role: 'assistant', text: 'Sure. Take your time, I am here.', final: true, at: Date.now(), via: 'typed' }), 1200)
+})
+
 const PHASES: Phase[] = ['asleep', 'listening_for_name', 'connecting', 'live', 'speaking', 'thinking', 'error']
 
 function baseState(over: Partial<CompanionState>, settings: Settings): CompanionState {
@@ -126,16 +137,16 @@ function Gallery(): ReactElement {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [answer, setAnswer] = useState('')
   const [level, setLevel] = useState<HelpLevel>(2)
-  const [tab, setTab] = useState<DockTab>('now')
+  const [tab, setTab] = useState<DockTab>('chat')
   const [empty, setEmpty] = useState(false)
   const persona: PersonaId = settings.persona ?? 'marcus'
   const name = PERSONAS[persona].displayName
   const patch = (p: Partial<Settings>): void => setSettings((s) => ({ ...s, ...p }))
 
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    patch({ theme: dark ? 'dark' : 'light' })
   }, [dark])
-  useEffect(() => applyDesignSettings(settings, persona), [settings.bigAnnotations, settings.highContrast, settings.dyslexiaFont, persona]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => applyDesignSettings(settings, persona, document.documentElement, { glassSupported: true }), [settings.bigAnnotations, settings.highContrast, settings.dyslexiaFont, settings.glass, settings.glassOpacity, settings.textScale, persona]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     window.alongside.learnerSnapshot = () => Promise.resolve(empty ? emptySnapshot : snapshot)
   }, [empty])
@@ -153,6 +164,7 @@ function Gallery(): ReactElement {
           <Switch label="High contrast" checked={settings.highContrast} onChange={(v) => patch({ highContrast: v })} />
           <Switch label="Big marks (also scales the UI)" checked={settings.bigAnnotations} onChange={(v) => patch({ bigAnnotations: v })} />
           <Switch label="Dyslexia font" checked={settings.dyslexiaFont} onChange={(v) => patch({ dyslexiaFont: v })} />
+          <Switch label="Glass" checked={settings.glass} onChange={(v) => patch({ glass: v })} />
           <Switch label="Empty progress" checked={empty} onChange={setEmpty} />
         </div>
       </header>
@@ -242,14 +254,14 @@ function Gallery(): ReactElement {
           </div>
         </Specimen>
 
-        <Specimen title="Dock: expanded panel" wide>
-          <div className="gl-row gl-panels">
+        <Specimen title="Dock: expanded panel (chat, with a canned reply to typed messages)" wide>
+          <div className="gl-row gl-panels gl-stage">
             {(['live', 'speaking', 'asleep', 'error'] as Phase[]).map((p) => (
               <div key={p} className="al-dock al-dock--panel gl-dock">
                 <Panel
                   state={baseState({ phase: p, level, agents: p === 'live' ? agents.slice(0, 2) : [], skill: p === 'live' || p === 'speaking' ? { id: 'bigger_text', name: 'Make the text bigger', step: 2, stepCount: 4 } : undefined, lastError: p === 'error' ? 'I could not reach the internet.' : undefined, captions: p === 'asleep' ? [] : captions }, settings)}
                   settings={settings} personaName={name} tab={tab} onTab={setTab} onCollapse={noop} onStop={noop} onToggleMute={noop} onWake={noop}
-                  onCancelAgent={noop} onSettings={patch} onboarding={null}
+                  onCancelAgent={noop} onSettings={patch} onSetUpAgain={noop}
                 />
               </div>
             ))}
@@ -278,6 +290,7 @@ style.textContent = `
   .gl-frame { position: relative; min-height: 340px; display: grid; place-content: start; gap: 12px; padding: 16px; border: 1.5px dashed var(--line-strong); border-radius: 22px; overflow: hidden; }
   .gl-dock { position: relative; width: 360px; max-width: 100%; }
   .gl-panels .al-dock--panel { height: 640px; }
+  .gl-stage { padding: 20px; border-radius: 22px; background: linear-gradient(150deg, #5d7ba6 0%, #8a5da6 55%, #d6935a 100%); }
   .gl-profile { height: 720px; display: flex; flex-direction: column; }
   .gl-profile .al-dock__body { flex: 1; }
   .gl-pills { flex-direction: row; flex-wrap: wrap; }

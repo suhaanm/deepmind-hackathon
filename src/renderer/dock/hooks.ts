@@ -58,3 +58,47 @@ export function useProgressData(active: boolean, demoMode: boolean): ProgressDat
   }, [active, demoMode])
   return data
 }
+
+/** True once main says Screen Recording is not allowed (or the capture probe came back empty). false until the first answer. */
+export function useScreenBlocked(): boolean {
+  const [blocked, setBlocked] = useState(false)
+  useEffect(() => {
+    const perms = window.alongside.permissions
+    if (!perms) return
+    let alive = true
+    void perms.status().then((s) => alive && setBlocked(s.screen !== 'granted'))
+    const off = perms.onChange((s) => setBlocked(s.screen !== 'granted'))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+  return blocked
+}
+
+interface ShowtimeLike {
+  state(): Promise<{ running: boolean }>
+  onState(cb: (s: { running: boolean }) => void): () => void
+}
+
+/** True while the Showtime walkthrough is running. */
+export function useShowtimeActive(): boolean {
+  const [active, setActive] = useState(false)
+  useEffect(() => {
+    const api = (window.alongside as unknown as { showtime?: ShowtimeLike }).showtime
+    if (!api) return
+    let alive = true
+    void api.state().then((s) => alive && setActive(s.running))
+    const off = api.onState((s) => setActive(s.running))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+  return active
+}
+
+/** A live session is something Stop can end: connecting, talking, thinking or speaking. */
+export function sessionActive(phase: CompanionState['phase']): boolean {
+  return phase === 'connecting' || phase === 'live' || phase === 'thinking' || phase === 'speaking'
+}

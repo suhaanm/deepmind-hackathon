@@ -5,6 +5,7 @@ import type { OverlayCommand, ShotPurpose } from '../shared/protocol'
 import type { Services } from '../shared/contracts'
 import type { ServiceContext } from './context'
 import type { SessionController } from './session'
+import type { ShellTray } from './tray'
 import type { Dispatch } from './tools/dispatcher'
 import { z } from 'zod'
 
@@ -15,6 +16,8 @@ export interface DebugDeps {
   session: SessionController
   // Optional window capture helpers (Electron only); absent in unit tests.
   capture?: { overlayPng(): Promise<Buffer | null>; dockPng(): Promise<Buffer | null> }
+  // SHELL: the menu-bar item (absent when headless).
+  tray?: Pick<ShellTray, 'info' | 'activate' | 'primaryClick'>
 }
 
 const MAX_BODY = 1_000_000
@@ -105,7 +108,18 @@ export function startDebugServer(deps: DebugDeps): http.Server {
           return send(200, { ok: true })
         case 'POST /settings': {
           const body = z.object({ patch: z.record(z.string(), z.unknown()) }).parse(await readJson(req))
-          return send(200, ctx.settings.patch(body.patch))
+          // FILES: folders are added only through the native dialog (files:addFolder), never via a settings patch.
+          const { fileFolders: _folders, ...patch } = body.patch
+          return send(200, ctx.settings.patch(patch))
+        }
+        case 'GET /tray':
+          return deps.tray ? send(200, deps.tray.info()) : send(404, { error: 'no tray (headless)' })
+        case 'POST /tray/click': {
+          if (!deps.tray) return send(404, { error: 'no tray (headless)' })
+          const body = z.object({ id: z.string().optional() }).parse(await readJson(req))
+          if (body.id === undefined) deps.tray.primaryClick() // the icon click itself
+          else if (!deps.tray.activate(body.id)) return send(400, { error: `unknown or disabled menu item: ${body.id}` })
+          return send(200, { ok: true })
         }
         case 'GET /overlay.png':
         case 'GET /dock.png': {

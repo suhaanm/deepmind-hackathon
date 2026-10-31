@@ -37,13 +37,13 @@ Real-time paced streaming of 100 ms chunks; 36 "Hey <name>" clips across 18 voic
 | First **interim** containing the name, vs end of speech | -144 ms | **364 ms** | 522 ms | 803 ms |
 | **Final** transcript vs end of speech | | 1105 ms | | 1730 ms |
 
-Through the full spotter (`tests/wake/live-e2e.test.ts`: real spotter, production `mintWakeToken` ephemeral token, 1 s of room tone, clip, then continuous quiet noise), `onWake` fired after end of speech at: 221, 437, 728, 748 ms for bare "Hey <name>" on four voices, and 2965 ms on the one voice the recogniser handles worst (Flo). For "Hey <name>, <request>" the name is recognised while the user is still speaking the request (-403 ms on one clip) but one clip fired 1432 ms after the end of the sentence. Expect roughly **0.4 to 1 s after the name** in the normal case and occasional multi-second outliers. The matcher fires on **interim** text; finals are too slow (about 1.1 s) and sometimes never arrive for a short utterance.
+Through the full spotter (`tests/wake/live-e2e.test.ts`: real spotter, production `mintWakeToken` ephemeral token, 1 s of room tone, the clip, then continuous quiet noise), `onWake` fired after the end of speech at **512, 583, 633, 697 ms** for bare "Hey <name>" on four voices and at **1726 ms** on the one voice the recogniser handles worst (Flo). For "Hey <name>, <request>" it fired **476 and 813 ms before the end of the sentence**, because the name is recognised while the user is still speaking the request. Expect roughly **0.5 to 0.7 s after the name** in the normal case and occasional outliers of 1.5 s or more; an earlier run of the same voices showed a 1.4 s and a 3.0 s outlier. The matcher fires on **interim** text; finals take about 1.1 s and are sometimes slow or absent for a short utterance.
 
 ### Findings that shaped the implementation
 
 1. **Language hints matter.** With auto-detect, Flo's "Hey Amelia" came back as `miúdo` and Fred's "Hey Marcus" as `Hey Maracas`. `languageCodes: ['en-GB','en-US']` plus `customVocabulary: [<persona names>]` fixed both (A/B on the 14 hardest clips: name heard exactly 7/14 baseline, 8/14 language only, 9/14 vocabulary only; the remaining misses were clips with no transcript at all). Both are on by default in `engine-gemini.ts`. Names for the vocabulary come from `wakePhrases`, never hard-coded.
-2. **Synthetic clips that start at speech onset can return nothing.** 5 of 18 voices returned empty transcripts for some clips (the server VAD swallows speech that starts at byte 0). Prepending 1 s of room tone recovered 3 of 5; Sandy (UK) stayed empty (a voice quirk, not a spotter issue). A live microphone always has a lead-in, and the spotter streams continuously, so this is a test artefact; the e2e test therefore prepends room tone.
-3. **Mid-utterance streaming does not drop the first word as a rule, but it can.** A real transcript `Amelia.` (no "Hey") appeared, so the matcher accepts a bare name only on a **final** transcript that is exactly the name or starts with it plus a comma (see "Matcher").
+2. **Synthetic clips that start at speech onset can return nothing.** 11 of the 72 wake clips (4 of 18 voices: Eddy UK, Reed US, Sandy UK, Grandma US) came back with no transcript at all in the bulk run, where the audio began at byte 0 of the stream and 6 sessions ran in parallel. Re-running with 1 s of room tone in front recovered 3 of 5 retested clips; Sandy (UK) stayed empty (a voice quirk). A live microphone always has a lead-in and the spotter streams continuously, so this is a test artefact; the e2e test therefore prepends room tone. It does mean the 36-clip latency sample above covers only the voices that returned text.
+3. **The recogniser sometimes drops or mangles "hey".** Real transcripts included `Amelia.` alone, `Emilia`, and on the hardest voice (Flo, en_US) `Amelia` repeated for 9 s as an interim that never finalised, or `유미야` / `É o meu` (Korean/Portuguese hallucinations; about 50% of runs before the fixes). Three defences: language hints + vocabulary (finding 1); the matcher accepts a bare name on a **final** transcript that is exactly the name or opens with it plus a comma (see "Matcher"); and the spotter treats an interim that has stood **unchanged for 1.2 s** as final (the server repeats an unchanged interim about every 0.5 s), so a stuck bare `Amelia.` still wakes while "Marcus Aurelius was..." (text keeps changing) never does. After these changes the Flo clip woke in the one full e2e run made afterwards (at 1.7 s); that is a single sample, not a measured rate. Real voices will be different, which is why the hotkey is the stage path.
 4. Mock mode: `getToken()` returns `{token:'mock'}` and the engine goes ready but never transcribes, so `ALONGSIDE_MOCK=1` runs without cloud audio. Use the hotkey or debug `POST /wake` instead.
 
 ### 10-minute connection cap and reconnect
@@ -67,14 +67,14 @@ While the status is `listening`, **microphone audio is streamed to Google (Gemin
 
 ## C. Global hotkeys (spike C)
 
-`src/main/hotkey.ts` uses Electron `globalShortcut` (no Accessibility or Input Monitoring prompt is expected for this API; not verified on a fresh machine). Probe on this Mac (`spikes/wake/hotkey-probe.cjs`, run under `scripts/electron-lock.sh WAKE`): all candidates registered successfully.
+`src/main/hotkey.ts` uses Electron `globalShortcut` (no Accessibility or Input Monitoring prompt is expected for this API; not verified on a fresh machine). Probe on this Mac (`spikes/wake/hotkey-probe.cjs`, run under `scripts/electron-lock.sh WAKE`): all 7 candidates it tried registered successfully (the shipped set is the subset below plus the Shift variants).
 
 | Action | Accelerators (all registered, first is primary) |
 |---|---|
-| Start session with the last/default persona | `CommandOrControl+Alt+Space`, `Control+Alt+Space`, `CommandOrControl+Alt+Shift+S` |
-| Stop (closes Live in the dock and ends the session) | `CommandOrControl+Alt+M`, `CommandOrControl+Alt+Escape`, `CommandOrControl+Alt+Shift+X` |
+| Start session with the last/default persona | `CommandOrControl+Alt+Space`, `CommandOrControl+Alt+Shift+Space`, `CommandOrControl+Alt+Shift+S` |
+| Stop (closes Live in the dock and ends the session) | `CommandOrControl+Alt+M`, `CommandOrControl+Alt+Shift+X` |
 
-Behaviour: Start emits `session:request{personaId, source:'hotkey'}` using `settings.persona ?? DEFAULT_PERSONA`, and is **ignored while a session is already running** (no accidental restart). Stop calls `session.stop('stop')`, which tells the dock to close Live and emits `session:ended`. Registration failures are tolerated (each action has fallbacks); if no Start or no Stop combo can be registered, `state.lastError` carries a plain-language message. Combos are unregistered on quit. `tests/wake/hotkey.test.ts` covers all of this, including Start then Stop against the real `registerSession`. macOS reserves some combos (Cmd+Alt+Space is Finder search, Cmd+Alt+Esc is Force Quit); `register()` returned true here but a real key press has **not** been tried by an agent, so the stage-day checklist includes pressing them.
+Behaviour: Start emits `session:request{personaId, source:'hotkey'}` using `settings.persona ?? DEFAULT_PERSONA`, and is **ignored while a session is already running** (no accidental restart). Stop calls `session.stop('stop')`, which tells the dock to close Live and emits `session:ended`. Registration failures are tolerated (each action has fallbacks); if no Start or no Stop combo can be registered, `state.lastError` carries a plain-language message. Combos are unregistered on quit. `tests/wake/hotkey.test.ts` covers all of this, including Start then Stop against the real `registerSession`. Cmd+Alt+Space may be claimed by macOS (Finder search window); `register()` returned true here but a real key press has **not** been tried by an agent, so the stage-day checklist includes pressing them, and each action has fallbacks. `Cmd+Alt+Esc` (Force Quit) and `Ctrl+Alt+Space` (input-source switch) are deliberately left alone so the presenter keeps their escape hatches.
 
 ## Alias harvest and the realism problem
 
@@ -165,12 +165,22 @@ Do this in order, on the demo machine, on the venue network, with the same micro
 ## Unverified (needs a real voice, a real room, or a fresh machine)
 
 - Any real human voice: accents, mumbling, older voices, soft speech, distance, room noise, music, a second speaker, a TV.
-- Real key presses for the global shortcuts (registration was verified; the system may swallow `Cmd+Alt+Esc` or `Cmd+Alt+Space` before Electron sees them).
+- Real key presses for the global shortcuts (registration was verified; the system may swallow `Cmd+Alt+Space` for Finder search before Electron sees it, hence the fallbacks).
 - macOS permission prompts for global shortcuts on a clean machine (none expected).
-- The spotter wired into the dock `controller.ts` in the running app (interface is stable and unit-tested against fakes; end-to-end was run in Node with a WAV-fed mic, not through the dock's `getUserMedia` / `AudioWorklet` path in Electron).
-- The 12-minute cap test result if it had not finished when this was written (see the log below).
+- The spotter running inside the full app with a real microphone. What *was* verified: the real renderer capture path in a hidden Electron window (see the verification log), fed by a synthesised `MediaStream`; Chromium's own `--use-file-for-fake-audio-capture` returned pure silence on this macOS for every WAV format tried, so it could not be used. LIVE has wired the spotter into `dock/controller.ts` (read, not exercised by me).
+- The cap test ran one wake before and one after the first rotation (see the log); it did not play speech during the swap itself.
 - Echo: persona TTS leaking into the spotter is blocked by pausing for the Live session, not by acoustic echo cancellation.
 
-## Verification log
+## Verification log (all on 31 Oct 2026, this Mac, real API key, synthetic speech)
 
-(filled in at the end of the run; see the report to `main`)
+| Check | Result |
+|---|---|
+| `npm run typecheck` | clean, whole repo (the DOM types needed by two wake files come from `/// <reference lib="dom" />`; no tsconfig change) |
+| `npm test` | 40 files / 657 tests pass (wake: matcher 49, spotter 22, hotkey 7, collisions 2; 18 opt-in live tests are skipped by default) |
+| `npm run build` | passes |
+| Matcher on 97 real transcript streams | 0 wrong/false fires; wake recall above the 90% asserted over clips that returned text |
+| Spotter e2e, `WAKE_LIVE=1 npx vitest run tests/wake/live-e2e.test.ts` (real spotter, production `mintWakeToken` ephemeral token) | 17/17 on the final run: 7/7 positives, 10/10 negatives (10 s each, no wake). Earlier runs before the language hints and the stable-interim rule: 6/7 positives (Flo voice intermittent) |
+| 12-minute connection cap, `WAKE_LIVE_LONG=1 npx vitest run tests/wake/live-long.test.ts` | pass: woke at 32 s and again at 692 s; the token log shows a **proactive rotation mint at 573 s** (a connection opened at 33 s would have been closed by the server near 633 s); no `reconnecting`/`unavailable` status in between. (A first run of this test had a harness bug that replayed the schedule and instead exercised 22 wake, pause, resume cycles; all 22 worked.) |
+| Real renderer path in Electron (`spikes/wake/harness/`, hidden window, `scripts/electron-lock.sh WAKE`) | `createMicAudioSource` produced 100 ms Int16 frames at 10 per second from `getUserMedia`-shaped streams (verified with Chromium's default fake device: peak 32767), then a WAV played through a `MediaStreamDestination` into the real spotter, real ephemeral token and real service woke `marcus` ("Hi Marcus." interim) 2.6 s after playback started (about 0.6 s after the name ended), status went `listening` then `paused` for `live`, and `takePreroll()` returned 1.5 s of audio. The recogniser also emitted `Haymaker` for "Hey" along the way without a false wake |
+| Global hotkeys in the real app | `[hotkey] start: CommandOrControl+Alt+Space, CommandOrControl+Alt+Shift+Space, CommandOrControl+Alt+Shift+S \| stop: CommandOrControl+Alt+M, CommandOrControl+Alt+Shift+X` printed by the built app under the Electron lock (`ALONGSIDE_HEADLESS=1 ALONGSIDE_MOCK=1`); `/state` reported phase `listening_for_name`. Start then Stop against the real `registerSession` is a unit test. **Physical key presses: not tried.** |
+| Raw error text | QA found raw IPC/API text in `lastError`; fixed (plain-English `detail`, raw error in the console, unit-tested) and the spotter now self-recovers when the network returns (tested with fake timers) |

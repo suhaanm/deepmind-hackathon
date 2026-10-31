@@ -2,7 +2,7 @@
 // hints-per-task series (the anti-dependency proof). Pure and serialisable: no node imports, so the dock
 // renderer can import it directly, or it can travel over IPC as JSON.
 import type { HelpLevel, LearnerSnapshot, SkillId } from '../../shared/protocol'
-import { SKILL_IDS } from '../../shared/protocol'
+import { BUILTIN_SKILL_IDS, SKILL_IDS } from '../../shared/protocol'
 import { LEVEL_LABEL, isMastered } from './levels'
 import { SKILLS } from './skills/definitions'
 
@@ -52,6 +52,8 @@ export interface ProgressData {
     headline: string
   }
   nextSuggested: { skillId: SkillId; reason: string } | null
+  // Times the assistant did something for the learner (dependency, shown honestly); only present when it happened.
+  doneForMe?: { total: number; text: string }
 }
 
 function modeFor(level: HelpLevel, practised: boolean): SkillMode {
@@ -67,8 +69,9 @@ function plural(n: number, word: string): string {
 export function buildProgress(snapshot: LearnerSnapshot, opts: { now: number; demoMode?: boolean }): ProgressData {
   const attempts = [...snapshot.attempts].sort((a, b) => a.endedAt - b.endedAt)
 
-  const skills: SkillProgress[] = SKILL_IDS.map((id) => {
-    const s = snapshot.skills[id]
+  const shown: SkillId[] = snapshot.skills.custom ? [...BUILTIN_SKILL_IDS, 'custom'] : [...BUILTIN_SKILL_IDS]
+  const skills: SkillProgress[] = shown.map((id) => {
+    const s = snapshot.skills[id] as LearnerSnapshot['skills'][SkillId] & object
     const mine = attempts.filter((a) => a.skillId === id)
     return {
       skillId: id,
@@ -119,9 +122,11 @@ export function buildProgress(snapshot: LearnerSnapshot, opts: { now: number; de
 
   const confidencePoints = [...snapshot.confidenceLog].sort((a, b) => a.at - b.at)
 
-  const due = skills.filter((s) => s.reviewDue).sort((a, b) => (a.nextReview ?? 0) - (b.nextReview ?? 0))[0]
-  const untried = skills.find((s) => s.attempts === 0 && s.mode === 'not_started')
-  const lowest = [...skills].filter((s) => !s.mastered).sort((a, b) => a.level - b.level)[0]
+  // Suggestions are built-in lessons; "something new" is whatever the learner asks for next.
+  const builtins = skills.filter((s) => s.skillId !== 'custom')
+  const due = builtins.filter((s) => s.reviewDue).sort((a, b) => (a.nextReview ?? 0) - (b.nextReview ?? 0))[0]
+  const untried = builtins.find((s) => s.attempts === 0 && s.mode === 'not_started')
+  const lowest = [...builtins].filter((s) => !s.mastered).sort((a, b) => a.level - b.level)[0]
   const nextSuggested: ProgressData['nextSuggested'] = due
     ? { skillId: due.skillId, reason: 'A quick refresher is due.' }
     : untried
@@ -129,6 +134,8 @@ export function buildProgress(snapshot: LearnerSnapshot, opts: { now: number; de
       : lowest
         ? { skillId: lowest.skillId, reason: 'The one with the most room to grow.' }
         : null
+
+  const doneTotal = Object.values(snapshot.doneForMe ?? {}).reduce((a, b) => a + b, 0)
 
   return {
     generatedAt: opts.now,
@@ -142,5 +149,6 @@ export function buildProgress(snapshot: LearnerSnapshot, opts: { now: number; de
     hintsPerTask,
     overall: { attempts: attempts.length, firstAttemptHints: first?.hints ?? null, latestAttemptHints: latest?.hints ?? null, trend, headline },
     nextSuggested,
+    ...(doneTotal > 0 ? { doneForMe: { total: doneTotal, text: `Done for you: ${doneTotal} time${doneTotal === 1 ? '' : 's'}. Ask to be shown and you will need this less.` } } : {}),
   }
 }

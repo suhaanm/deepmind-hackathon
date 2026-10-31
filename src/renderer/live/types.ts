@@ -54,6 +54,8 @@ export interface LiveSessionEvents {
   toolDone: { id: string; name: string; ms: number; error?: string; cancelled?: boolean }
   error: { message: string; fatal: boolean }
   ended: { reason: LiveEndReason }
+  // Non-fatal happenings worth logging; never shown to the learner.
+  notice: { kind: 'echo_guard' | 'mic_unavailable'; message: string }
   resumption: { handle: string | null; reconnected: boolean; resumed: boolean }
   // Per model turn: time from the last user audio above the noise floor (or an injected text) to the first model audio chunk.
   metrics: { kind: 'ttfa'; ms: number; trigger: 'voice' | 'text' } | { kind: 'setup'; ms: number } | { kind: 'usage'; totalTokens: number }

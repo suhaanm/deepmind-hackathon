@@ -15,6 +15,7 @@ const SKILL_NAMES: Record<SkillId, string> = {
   video_call: 'Video calls',
   spot_scam: 'Spotting scam messages',
   bigger_text: 'Making text bigger',
+  custom: 'Something new',
 }
 
 const LEVEL_NAMES: Record<HelpLevel, string> = {
