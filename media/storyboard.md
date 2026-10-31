@@ -1,13 +1,13 @@
-# Alongside v4 (teaching) storyboard, 63.0 s, 1920x1080, 30 fps
-Times are video seconds, driven by audio4/cues.json (final master.wav). Engine: v4/work/engine.html (GSAP-free, deterministic R(t)), rendered by v4/work/render.mjs (6 headless Chromes), built by v4/work/build.sh.
+# Alongside v4 (teaching, one flow) storyboard, 55.0 s, 1920x1080, 30 fps
+One task ("make the text bigger") in ONE flow. The assistant leads, the user never goes wrong, and help fades inside the task: Walk with me (step 1) -> Nudge me (step 2) -> On my own (step 3). Times follow audio4/cues.json (final master.wav). Engine: work/engine.html; build: work/build.sh.
 
-| Scene | t (s) | On screen | Voice (cues.json) |
+| Scene | t (s) | On screen | Voice |
 |---|---|---|---|
-| T0 kinetic | 0-3.3 | "It doesn't just help. It builds digital literacy." then "It teaches you. Then it steps back." | music pad only |
-| T1 | 3.4-7 | User line as kinetic words + waveform pill; real System Settings windows fade in at 7.9 | USER 3.4: "Hey Marcus, I'd like to make the text bigger." |
-| T2 Level 1 | 9.2-19 | Chip "Help level 1 of 4 - Watch me | Step 1/2/3 of 3". Camera eases to 1.9x on each target. BLUE ghost cursor, label "Showing you. I will not click.", glides: sidebar Accessibility (12.2), Display row (14.4), then the second window's Text size row (16.6). No click, no ring | ASST 9.4 "Let me show you first. Watch where I go. I won't click anything." |
-| T3 Level 2 | 19.1-30 | Chip -> "Help level 2 of 4 - Walk with me | Step 1 of 3". Tight ring + number badge on each target. User macOS arrow clicks (white ripple): Accessibility 21.9, WRONG click on Appearance 23.6 (Appearance pane shows, red ring, hint pill "Not quite. Display is just below."), Display 26.8, Text size 28.6; green tick after each step | ASST 19.4 "Now you try. I'll point, you click." / 24.0 "Not quite. Display is just below." / 28.5 "That's it. Well done." |
-| T4 Level 3 | 30.0-40.8 | Chip -> "Help level 3 of 4 - Nudge me | Step 1 of 3". No ring. Cursor drifts (stall), soft warm glow around the target at 31.2, spoken clue 31.6; side card "Hints this time: 1". User then finds Accessibility 35.9, Display 37.8, Text size 39.6 on her own, ticks | ASST 31.6 "Take your time. Look near the top left." |
-| T5 teach-back | 40.8-51.9 | Camera 1.9x on Text size row; composed slider card (knob animates up while the user answers); green tick after the answer; then a 1-5 confidence dial animates 1 -> 4 (49.0-51.6) | ASST 41.2 "In your own words, what does that slider do?" / USER 44.9 "It makes everything bigger." / ASST 47.6 "Exactly right. How sure do you feel, from one to five?" |
-| T6 Progress | 51.9-60 | Glass card "Digital literacy: things you can do now": 'Make text bigger' ticked, "Hints per try" bars 5 -> 3 -> 1, memory line "Last time you found Display on your own" | ASST 52.2 "Next time, I'll only step in if you ask. That's the point." / 58.0 caption "Digital literacy, built one small skill at a time." |
-| T7 end | 60.55-63 | Product placeholder + "It tries to get fired." (over the T7_1 caption, no overlap) | ASST 58.0-62.35 "Digital literacy, built one small skill at a time." |
+| T0 | 0-3.3 | Kinetic: "It doesn't just help. It builds digital literacy." then "It teaches you. Then it steps back." | music pad only |
+| T1 | 3.4-7 | User words + waveform pill; real System Settings window fades in | USER 3.4 "Hey Marcus, I'd like to make the text bigger." |
+| Step 1 | 7.4-13 | Chip "Help level 2 of 4 - Walk with me | Step 1 of 3". Tight ring + badge 1 on Accessibility; user macOS arrow clicks (~12.4, white ripple); green tick | N1 7.4 "Of course. I'll guide you. First, click Accessibility." |
+| Step 2 | 13.2-18.5 | Chip "Help level 3 of 4 - Nudge me | Step 2 of 3". Tight soft golden glow on the Display row, no ring; user clicks Display (~17.2); tick; window shows the Display pane | N2 13.2 "Good. Now look for Display. It's glowing." |
+| Step 3 | 19-27 | Chip "Help level 4 of 4 - On my own | Step 3 of 3". NO ring, NO glow, assistant silent; the cursor pauses and drifts, then clicks Text size (~25.0); tick. Then side card "Hints this time: 2" | N3 19.0 "You've got this. Find Text size on your own." / 27.0 "That's it. Well done." |
+| Teach-back | 29.8-43 | Camera on the Text size row; composed slider card (knob animates during the user's answer); green tick; 1-5 confidence dial lands on 4 | ASST 30.2 "In your own words, what does that slider do?" / USER 34.4 "It makes everything bigger." / ASST 37.8 "Exactly right. How sure do you feel, from one to five?" |
+| Progress | 43.2-52 | Glass card "Digital literacy: things you can do now": 'Make text bigger' ticked, "Hints per task" bars 5 -> 3 -> 2, line "Fewer hints each time." | ASST 43.5 "Next time, I'll only step in if you ask. That's the point." / 49.4 caption "Digital literacy, built one small skill at a time." |
+| End | 51.6-55 | Product placeholder + "It tries to get fired." | ASST 49.4-53.75 |

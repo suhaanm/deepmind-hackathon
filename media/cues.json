@@ -7,73 +7,66 @@
   "end": 6.96
  },
  {
-  "id": "T2_1",
+  "id": "N1",
   "speaker": "ASSISTANT",
-  "text": "Let me show you first. Watch where I go. I won't click anything.",
-  "start": 9.4,
-  "end": 13.31
+  "text": "Of course. I'll guide you. First, click Accessibility.",
+  "start": 7.4,
+  "end": 12.1
  },
  {
-  "id": "T3_1",
+  "id": "N2",
   "speaker": "ASSISTANT",
-  "text": "Now you try. I'll point, you click.",
-  "start": 19.4,
-  "end": 22.38
+  "text": "Good. Now look for Display. It's glowing.",
+  "start": 13.2,
+  "end": 17.36
  },
  {
-  "id": "T3_2",
+  "id": "N3",
   "speaker": "ASSISTANT",
-  "text": "Not quite. Display is just below.",
-  "start": 24.0,
-  "end": 28.08
+  "text": "You've got this. Find Text size on your own.",
+  "start": 19.0,
+  "end": 23.01
  },
  {
   "id": "T3_3",
   "speaker": "ASSISTANT",
   "text": "That's it. Well done.",
-  "start": 28.5,
-  "end": 30.81
- },
- {
-  "id": "T4_1",
-  "speaker": "ASSISTANT",
-  "text": "Take your time. Look near the top left.",
-  "start": 31.6,
-  "end": 34.94
+  "start": 27.0,
+  "end": 29.31
  },
  {
   "id": "T5_1",
   "speaker": "ASSISTANT",
   "text": "In your own words, what does that slider do?",
-  "start": 41.2,
-  "end": 44.59
+  "start": 30.2,
+  "end": 33.59
  },
  {
   "id": "T5_2",
   "speaker": "USER",
   "text": "It makes everything bigger.",
-  "start": 44.9,
-  "end": 47.28
+  "start": 34.4,
+  "end": 36.78
  },
  {
   "id": "T5_3",
   "speaker": "ASSISTANT",
   "text": "Exactly right. How sure do you feel, from one to five?",
-  "start": 47.6,
-  "end": 51.77
+  "start": 37.8,
+  "end": 41.97
  },
  {
   "id": "T6_1",
   "speaker": "ASSISTANT",
   "text": "Next time, I'll only step in if you ask. That's the point.",
-  "start": 52.2,
-  "end": 56.61
+  "start": 43.5,
+  "end": 47.91
  },
  {
   "id": "T7_1",
   "speaker": "ASSISTANT",
   "text": "Digital literacy, built one small skill at a time.",
-  "start": 58.0,
-  "end": 62.35
+  "start": 49.4,
+  "end": 53.75
  }
 ]
