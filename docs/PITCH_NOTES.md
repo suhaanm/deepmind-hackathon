@@ -23,3 +23,7 @@ Full script, timings and judge Q&A are in `docs/DEMO_SCRIPT.md`. This page is on
 3. **That we tested it with real users**, unless you did today and hold their consent and exact words (`docs/USER_TEST_KIT.md`). The same goes for accuracy on a real, busy desktop and for scam-detection rates beyond the smoke test.
 
 Also avoid: calling any message "safe"; saying the Practice Sandbox ships (it is a separate pull request); any UK Finance, PSR or NHS figure you have not re-opened; and calling the pedagogy "evidence-based" (say "evidence-informed").
+
+## Do not claim (updated 15:49, real-Mac test)
+
+- Say multi-step control is verified for a Calculator task, not for browsers or all apps. On a real Mac, with real Gemini `computer_use` and one plan-confirmation click, it pressed 1, 2, +, 3, 0, = in Calculator as seven separate clicks (about one minute) and the screen showed 42; every click is in the audit log. **Not verified:** browser and website control (an earlier `open_for_me` to a site returned done without a confirmed landing tab, and `act_for_me` on Chrome failed at step 0 in testing), System Settings and Finder actions. Each action still passes the policy denylist, and Stop works; switch the loop off with `ALONGSIDE_AGENCY_LOOP=0`. Verified on a real Mac: pointing (10 of 11 real controls), refusals, Stop, Scam Shield and the real voice session.

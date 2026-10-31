@@ -224,6 +224,7 @@ Measured, not claimed. Each doc says how it was run and what it does not cover.
 
 ## Limitations and what's next
 
+- **Multi-step control (`act_for_me`) is ON by default and verified for one real-Mac task; browsers and other apps are not.** On a real Mac, with real Gemini `computer_use` and one plan-confirmation click, it pressed 1, 2, +, 3, 0, = in Calculator as seven separate clicks (about one minute) and the screen showed 42; every click is in the audit log. **Not verified:** browser and website control (an earlier `open_for_me` to a site returned done without a confirmed landing tab, and `act_for_me` on Chrome failed at step 0 in testing), System Settings and Finder actions. Each action still passes the policy denylist, and Stop works; switch the loop off with `ALONGSIDE_AGENCY_LOOP=0`. Verified on a real Mac: pointing (10 of 11 real controls), refusals, Stop, Scam Shield and the real voice session.
 Honest list:
 
 - **Wake word is cloud-based in this build.** The spotter streams short audio to `gemini-3.5-transcribe-live` while no session is open (visible listening light and mute toggle, push-to-talk-only setting). The production answer is an on-device wake word (a small on-device model); not built. The hotkey always works.

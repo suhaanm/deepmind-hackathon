@@ -21,7 +21,9 @@ export interface Agency {
   dispose(): void
 }
 
-export const agencyLoopFromEnv = (): boolean => process.env.ALONGSIDE_AGENCY_LOOP === '1'
+// ON by default (user decision 15:46); ALONGSIDE_AGENCY_LOOP=0 switches the multi-step loop off. It still needs agency != 'off' and
+// every action passes the policy engine and the confirmation gate.
+export const agencyLoopFromEnv = (): boolean => process.env.ALONGSIDE_AGENCY_LOOP !== '0'
 
 export function createAgency(deps: AgencyDeps & { act?: Partial<ActOptions> }): Agency {
   const sit = new Situation(deps.ctx, deps.now)

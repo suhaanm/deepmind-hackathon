@@ -1,5 +1,7 @@
 # Demo script: 3:00 live + 1:00 Q&A
 
+> **Verification status (read before presenting).** **Multi-step control (`act_for_me`) is ON by default and verified for one real-Mac task; browsers and other apps are not.** On a real Mac, with real Gemini `computer_use` and one plan-confirmation click, it pressed 1, 2, +, 3, 0, = in Calculator as seven separate clicks (about one minute) and the screen showed 42; every click is in the audit log. **Not verified:** browser and website control (an earlier `open_for_me` to a site returned done without a confirmed landing tab, and `act_for_me` on Chrome failed at step 0 in testing), System Settings and Finder actions. Each action still passes the policy denylist, and Stop works; switch the loop off with `ALONGSIDE_AGENCY_LOOP=0`. Verified on a real Mac: pointing (10 of 11 real controls), refusals, Stop, Scam Shield and the real voice session. Demo the Calculator task as the multi-step example; do not present browser or other-app control as verified.
+
 Structured on the guide's four tests: **(1) a named real person, (2) it needs Argon, (3) it keeps people in control, (4) it runs live in under 3 minutes.** Judges score working live demos, so the live run is the product; everything else supports it.
 
 > Persona names below (Marcus, Amelia) are the current placeholders from `src/shared/personas.ts`. Find and replace when they are renamed. Say the demo honestly: the screen under the overlay is a **practice desktop**, the scam text is **staged**, and **demo mode** is on.

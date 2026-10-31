@@ -43,7 +43,7 @@ const CHIP_TITLE = 'Doing this for you'
 
 export interface ActOptions {
   gemini: () => GeminiDeps
-  // ALONGSIDE_AGENCY_LOOP=1: the loop stays hidden behind this flag until it is verified end to end.
+  // ALONGSIDE_AGENCY_LOOP=0 switches the loop off (it is on by default).
   loopEnabled: () => boolean
   maxSteps?: number
   totalMs?: number
