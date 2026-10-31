@@ -1,0 +1,293 @@
+{
+  "generatedAt": "2026-10-31T16:51:29.015Z",
+  "model": "gemini-3.8-flash-tts",
+  "lines": {
+    "c1-hello": {
+      "file": "c1-hello.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "6b98bfda66803b8e",
+      "durationMs": 9360
+    },
+    "c1-more": {
+      "file": "c1-more.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "ba734dd610652c54",
+      "durationMs": 6120
+    },
+    "c2-1": {
+      "file": "c2-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "4c125a7732e810fd",
+      "durationMs": 4120
+    },
+    "c2-2": {
+      "file": "c2-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "1663df0b4c5d62aa",
+      "durationMs": 4120
+    },
+    "c2-3": {
+      "file": "c2-3.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "7ad529cf3f496722",
+      "durationMs": 2720
+    },
+    "c2-4": {
+      "file": "c2-4.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "557fedd22c733fb9",
+      "durationMs": 3680
+    },
+    "c2-wrong": {
+      "file": "c2-wrong.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "f506ed959aef5397",
+      "durationMs": 5640
+    },
+    "c2-tb": {
+      "file": "c2-tb.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "644750265dfebe6d",
+      "durationMs": 3640
+    },
+    "c2-tb2": {
+      "file": "c2-tb2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "04f6e478f4a644b7",
+      "durationMs": 3200
+    },
+    "c2-5": {
+      "file": "c2-5.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "16ab33c8d10479c9",
+      "durationMs": 3600
+    },
+    "c3-1": {
+      "file": "c3-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "d4b78b0766fc3f07",
+      "durationMs": 7880
+    },
+    "c3-2": {
+      "file": "c3-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "0a791c634ca43bc8",
+      "durationMs": 3080
+    },
+    "c3-3": {
+      "file": "c3-3.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "7828cfcb16f233d1",
+      "durationMs": 3120
+    },
+    "c3-4": {
+      "file": "c3-4.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "d6a38fb28d9bad90",
+      "durationMs": 5160
+    },
+    "c3-5": {
+      "file": "c3-5.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "7c3f8118929bd060",
+      "durationMs": 7160
+    },
+    "c4-1": {
+      "file": "c4-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "6ce409432fcd5287",
+      "durationMs": 3160
+    },
+    "c4-2": {
+      "file": "c4-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "b96fc782e742c640",
+      "durationMs": 6400
+    },
+    "c4-3": {
+      "file": "c4-3.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "79624b3476c2cfc8",
+      "durationMs": 4120
+    },
+    "c4-4": {
+      "file": "c4-4.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "5594ab477df4272c",
+      "durationMs": 7680
+    },
+    "c4-5": {
+      "file": "c4-5.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "bc244790bd35181e",
+      "durationMs": 5320
+    },
+    "c5-1": {
+      "file": "c5-1.wav",
+      "persona": "amelia",
+      "voice": "Sulafat",
+      "textHash": "e72b91f2e352a1b0",
+      "durationMs": 6560
+    },
+    "c5-2": {
+      "file": "c5-2.wav",
+      "persona": "amelia",
+      "voice": "Sulafat",
+      "textHash": "38aac939b917f23d",
+      "durationMs": 4600
+    },
+    "c6-1": {
+      "file": "c6-1.wav",
+      "persona": "amelia",
+      "voice": "Sulafat",
+      "textHash": "8fa8fd01d849e1a2",
+      "durationMs": 4640
+    },
+    "c6-2": {
+      "file": "c6-2.wav",
+      "persona": "amelia",
+      "voice": "Sulafat",
+      "textHash": "8fc9b3ecfbbda9ac",
+      "durationMs": 2440
+    },
+    "c6-3": {
+      "file": "c6-3.wav",
+      "persona": "amelia",
+      "voice": "Sulafat",
+      "textHash": "893bfffc325f393c",
+      "durationMs": 3520
+    },
+    "c7-1": {
+      "file": "c7-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "ea1ba8b4843cdda5",
+      "durationMs": 4080
+    },
+    "c7-2": {
+      "file": "c7-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "f0ececc259d51da6",
+      "durationMs": 6480
+    },
+    "c7-3": {
+      "file": "c7-3.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "0a73fc0310c7ee8b",
+      "durationMs": 6080
+    },
+    "c8-1": {
+      "file": "c8-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "e27ce4a70dd4bf99",
+      "durationMs": 4640
+    },
+    "c8-2": {
+      "file": "c8-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "0dfc1f516e634ae4",
+      "durationMs": 6080
+    },
+    "c10-1": {
+      "file": "c10-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "b1b2b71bf38e05a0",
+      "durationMs": 4160
+    },
+    "c10-2": {
+      "file": "c10-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "68ad9f87b8a260f5",
+      "durationMs": 6200
+    },
+    "c10-3": {
+      "file": "c10-3.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "2d627d1120146cdf",
+      "durationMs": 3960
+    },
+    "c10-4": {
+      "file": "c10-4.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "8a109a26626803ab",
+      "durationMs": 5640
+    },
+    "c11-1": {
+      "file": "c11-1.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "6a6be782e144e6c7",
+      "durationMs": 6320
+    },
+    "c11-2": {
+      "file": "c11-2.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "ddc3288815ead416",
+      "durationMs": 6800
+    },
+    "c2-tech": {
+      "file": "c2-tech.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "ec7bbfd2a54d8e74",
+      "durationMs": 6760
+    },
+    "c3-tech": {
+      "file": "c3-tech.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "daa671e4f59e3de8",
+      "durationMs": 7600
+    },
+    "c6-tech": {
+      "file": "c6-tech.wav",
+      "persona": "amelia",
+      "voice": "Sulafat",
+      "textHash": "dc7981bcca13b1a5",
+      "durationMs": 8080
+    },
+    "c9-tech": {
+      "file": "c9-tech.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "f76e4f78dd4d1501",
+      "durationMs": 5480
+    },
+    "c11-tech": {
+      "file": "c11-tech.wav",
+      "persona": "marcus",
+      "voice": "Charon",
+      "textHash": "417d6d722b140a5e",
+      "durationMs": 6680
+    }
+  }
+}

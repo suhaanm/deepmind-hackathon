@@ -13,7 +13,10 @@
     "e2e": "node tests/e2e/run.mjs",
     "preflight": "node scripts/preflight.mjs",
     "demo": "bash scripts/demo.sh",
-    "submit-check": "node scripts/submit-check.mjs"
+    "showtime": "bash scripts/start-demo.sh",
+    "demo:interactive": "bash scripts/start-demo.sh --interactive",
+    "submit-check": "node scripts/submit-check.mjs",
+    "showtime:render": "node scripts/showtime-render.mjs"
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "5.3.0",

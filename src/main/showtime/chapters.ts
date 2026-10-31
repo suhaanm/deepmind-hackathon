@@ -69,6 +69,10 @@ export function buildChapters({ full, lines = SCRIPT_LINES }: BuildOptions): Cha
     t.wait(300).do(click('video.precall.join'))
     t.wait(CLICK_MS + 1300).do(clear('r4', 'a4'), show(tick('t4', 'video.call.main_video')), noSkill)
     t.say('c2-5', { block: true })
+    // Teaching beat: the spoken teach-back (the product asks it after every task; the answer is a recorded fixture).
+    t.wait(200).do({ type: 'caption', speaker: 'system', text: 'Teach-back: you explain it, so it sticks.' }).say('c2-tb', { block: true })
+    t.wait(400).do(userSays('It starts the call with Lily.'))
+    t.wait(500).say('c2-tb2', { block: true })
     if (full) t.wait(300).say('c2-tech', { block: true })
     add({ id: 'it-shows-you-do', n: 2, title: 'It shows, you do', caption: 'A ring and a number show each step. A tick says it worked.', persona: 'marcus', requires: [] }, t)
   }
@@ -79,8 +83,8 @@ export function buildChapters({ full, lines = SCRIPT_LINES }: BuildOptions): Cha
     t.do({ type: 'progress.seed' }, go('video/lily'), skill(3))
     t.wait(200).do(level(3, 'two clean steps in a row', 'attempt'), { type: 'caption', speaker: 'system', text: 'Two clean steps: help steps back from Walk with me to Nudge me.' }).say('c3-1', { block: true })
     t.say('c3-2', { block: true })
-    t.wait(1200).do(show({ kind: 'ring', id: 'glow', target: 'video.start_call', tone: 'guide' }))
-    t.wait(1400).do(show({ kind: 'bubble', id: 'clue', target: 'video.start_call', text: "Look for the big green button under Lily's name.", tone: 'guide' })).say('c3-3', { block: true })
+    t.wait(800).do(show({ kind: 'ring', id: 'glow', target: 'video.start_call', tone: 'guide' }))
+    t.wait(1000).do(show({ kind: 'bubble', id: 'clue', target: 'video.start_call', text: "Look for the big green button under Lily's name.", tone: 'guide' })).say('c3-3', { block: true })
     t.do(clear('glow', 'clue'), level(2, 'stalled on this step, so this step gets an arrow', 'step'), show(ring('r3', 'video.start_call', 3, 'Start call'), arrow('a3', 'video.start_call')))
     t.wait(1300).do(click('video.start_call'))
     t.wait(CLICK_MS).do(clear('r3', 'a3'), show(tick('t3', 'video.start_call')), level(3, 'step done, help fades again', 'step'), noSkill)
@@ -92,7 +96,7 @@ export function buildChapters({ full, lines = SCRIPT_LINES }: BuildOptions): Cha
   // 4. Scam Shield (recorded report, real chip + highlight machinery)
   {
     const t = tl()
-    const stepMs = full ? 2200 : 1400
+    const stepMs = full ? 2200 : 1100
     t.do(go('desktop'), view('now'))
     t.wait(300).do({ type: 'stage.deliverScam' }).say('c4-1')
     t.wait(1800).do(go('messages/scam'))
@@ -155,7 +159,7 @@ export function buildChapters({ full, lines = SCRIPT_LINES }: BuildOptions): Cha
     t.do(go('desktop'))
     t.wait(300).do(userSays('Where did I save my GP letter?')).wait(500).do({ type: 'files.search', query: 'GP letter' }).say('c8-1', { block: true })
     if (full) t.wait(300).say('c8-2', { block: true })
-    t.wait(1200)
+    t.wait(600)
     add({ id: 'your-files', n: 8, title: 'Your files', caption: 'It finds your own files, only in folders you chose, and only reads them.', persona: 'marcus', requires: ['files'] }, t)
   }
 
@@ -164,10 +168,10 @@ export function buildChapters({ full, lines = SCRIPT_LINES }: BuildOptions): Cha
     const t = tl()
     t.do(go('video/call-screen'), view('chat'))
     t.wait(700).do({ type: 'dock.chat', id: 'q1', role: 'user', text: 'What does Join mean?' })
-    t.wait(1700).do({ type: 'dock.chat', id: 'a1', role: 'assistant', text: 'Join means: connect to the call. Press it once and Lily will see and hear you.' })
-    t.wait(3200).do({ type: 'dock.chat', id: 'q2', role: 'user', text: 'What if I press the wrong button?' })
-    t.wait(1700).do({ type: 'dock.chat', id: 'a2', role: 'assistant', text: 'Nothing breaks. Press the red Leave button to end the call, then try again.' })
-    t.wait(2800)
+    t.wait(1400).do({ type: 'dock.chat', id: 'a1', role: 'assistant', text: 'Join means: connect to the call. Press it once and Lily will see and hear you.' })
+    t.wait(2500).do({ type: 'dock.chat', id: 'q2', role: 'user', text: 'What if I press the wrong button?' })
+    t.wait(1400).do({ type: 'dock.chat', id: 'a2', role: 'assistant', text: 'Nothing breaks. Press the red Leave button to end the call, then try again.' })
+    t.wait(1800)
     if (full) {
       t.say('c9-tech', { block: true })
     }
@@ -184,7 +188,7 @@ export function buildChapters({ full, lines = SCRIPT_LINES }: BuildOptions): Cha
     t.wait(1200).do({ type: 'settings', patch: { textScale: 1.25 } })
     if (full) t.wait(1200).do({ type: 'settings', patch: { theme: 'dark' } })
     t.untilQuiet().wait(300).do(view('profile')).say('c10-2')
-    t.wait(3300).do({ type: 'profile.forget', match: 'Comparing the contacts list' })
+    t.wait(4600).do({ type: 'profile.forget', match: 'Comparing the contacts list' })
     t.untilQuiet().wait(300).do(view('now'), show({ kind: 'ring', id: 'stop', target: '@dock.stop', label: 'Stop', tone: 'warn' })).say('c10-3', { block: true })
     if (full) t.wait(300).say('c10-4', { block: true })
     add({ id: 'in-control', n: 10, title: "You're in control", caption: 'Change how it looks, make it forget a line, or press Stop at any time.', persona: 'marcus', requires: [] }, t)

@@ -181,7 +181,10 @@ export async function openStageWindow(opts: { log: (msg: string) => void; indexH
     },
     show() {
       wantVisible = true
-      if (alive()) assertOnScreen()
+      if (alive()) {
+        assertOnScreen()
+        app.focus({ steal: true }) // a real browser the tour opened may be frontmost: take the screen back
+      }
     },
     size() {
       if (!alive()) return null

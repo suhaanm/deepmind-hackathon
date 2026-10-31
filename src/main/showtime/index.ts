@@ -1,6 +1,6 @@
 // Showtime wiring (electron side): the real stage window, driver, IPC handlers and the bus / Stop hooks.
 import path from 'node:path'
-import { app, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { IPC } from '../../shared/ipc'
 import type { Services } from '../../shared/contracts'
@@ -30,12 +30,33 @@ export function registerShowtime(deps: RegisterShowtimeDeps): Showtime {
   const log = (msg: string): void => ctx.log('showtime', msg)
   const assetsDir = process.env.ALONGSIDE_SHOWTIME_ASSETS || path.join(app.getAppPath(), 'assets/showtime')
 
+  // The panel is hidden by default, but the tour shows the real dock (captions, level chip, Stop). It is shown for
+  // the tour only (showDock is not persisted) and goes back to hidden when the tour and its hand-over are over.
+  let panelShownByTour = false
+  const syncPanel = (s: { running: boolean; handover: boolean }): void => {
+    if (s.running && !windows.isDockVisible()) {
+      windows.showDock()
+      panelShownByTour = true
+    } else if (!s.running && !s.handover && panelShownByTour) {
+      panelShownByTour = false
+      if (!ctx.settings.get().showDock) windows.hideDock()
+    }
+  }
+
   const showtime = createShowtime({
     ctx,
     assetsDir,
     log,
-    openStage: () => openStageWindow({ log }),
-    publish: (s) => windows.broadcast(IPC.showtimeUpdate, s),
+    // Frontmost app, so macOS hides its menu bar and Dock behind the practice desktop (the panel and overlay sit above it).
+    openStage: async () => {
+      const stage = await openStageWindow({ log })
+      app.focus({ steal: true })
+      return stage
+    },
+    publish: (s) => {
+      syncPanel(s)
+      windows.broadcast(IPC.showtimeUpdate, s)
+    },
     stopSession: () => session.stop('replaced'),
     reloadLearner: async () => {
       await services.learner.load()
@@ -90,6 +111,21 @@ export function registerShowtime(deps: RegisterShowtimeDeps): Showtime {
     guard(event)
     return showtime.state()
   })
+
+  // Interactive demo (scripts/start-demo.sh --interactive): no tour, just the practice desktop, fullscreen and frontmost
+  // so the assistant can see it and the S / G / Shift+R / F keys reach it. The window closes with the app.
+  if (process.env.ALONGSIDE_STAGE_ONLY === '1') {
+    setTimeout(() => {
+      void openStageWindow({ log })
+        .then(() => {
+          app.focus({ steal: true })
+          const win = BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Practice desktop')
+          win?.focus()
+          log('practice desktop open for the interactive demo')
+        })
+        .catch((err: unknown) => log(`practice desktop could not open: ${err instanceof Error ? err.message : String(err)}`))
+    }, 2500)
+  }
 
   bindShowtimeBus(ctx.bus, showtime, log)
   // Hands-free launch for the demo and for headless smoke runs: ALONGSIDE_SHOWTIME_AUTOSTART=1 starts the tour once the windows are up.
