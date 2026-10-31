@@ -48,3 +48,5 @@ Contact sheets every 1.5 s and spot frames: no private content (public pages, st
 
 ## Published subset and audio update (16:30)
 This folder holds the final videos plus the storyboard, spec and design kit. Raw footage, stems, frames and the build engine (v3/, footage3/, audio/, audio3/, work/) stay local to keep the repo small. Final audio: voices + one very quiet constant music pad only. All sound effects (whooshes, toast chime, ticks) were removed because they were audible as screeches at line ends; the mix script is audio3/remix_clean.py (local).
+
+Audio update (16:40): the music pad was replaced by a pure, un-detuned C-major pad (no beating) that fades out by 56 s; the voices end at 53.3 s, so the last ~6 s are silent.
