@@ -27,6 +27,25 @@ export interface ChromeRects {
   chip?: Rect
 }
 
+// One to three words of the target label: the chip names the thing, it does not describe it.
+export function shortLabel(text: string): string {
+  const head = text.split(/\s+(?:in|on|at|of|from|inside|near|within)\s+/i)[0] ?? text
+  const words = head.replace(/[()[\]"]/g, ' ').split(/\s+/).filter(Boolean)
+  const stop = new Set(['the', 'a', 'an', 'button', 'key', 'icon'])
+  const core = words.filter((w) => !stop.has(w.toLowerCase()))
+  const pick = (core.length > 0 ? core : words).slice(0, 3).join(' ')
+  return pick.length > 24 ? `${pick.slice(0, 23)}…` : pick
+}
+
+// Ring/spotlight rect from a grounded box: at least minSize, at most maxSize per side (shrunk about the centre), then padded.
+export function fitRect(box: Rect, style: AnnotationStyle, pad: number): Rect {
+  const grown = atLeast(box, style.ring.minSize)
+  const w = Math.min(grown.w, style.ring.maxSize)
+  const h = Math.min(grown.h, style.ring.maxSize)
+  const capped = { x: grown.x + (grown.w - w) / 2, y: grown.y + (grown.h - h) / 2, w, h }
+  return inflate(capped, pad)
+}
+
 export const labelKey = (id: string, part: 'label' | 'bubble' | 'note'): string => `${id}:${part}`
 
 export function captionRect(size: Size, vp: Size, style: AnnotationStyle): Rect {
@@ -38,6 +57,8 @@ export function chipRect(size: Size, vp: Size, top: number): Rect {
 }
 
 export const CHIP_TOP = 56
+// Ring label chips are set at this fraction of the bubble font (about 13 px normally).
+export const LABEL_SCALE = 0.6
 
 // Captions live at the bottom, but the learner's targets often do too (call controls, Dock). When a mark would be
 // covered, the band moves to the top, below the level chip, unless that covers more.
@@ -71,10 +92,10 @@ export function planScene(entries: ActiveAnnotation[], vp: Size, style: Annotati
   for (const { annotation: a } of entries) {
     switch (a.kind) {
       case 'ring': {
-        const rect = inflate(atLeast(boxRect(a.box), style.ring.minSize), style.ring.pad)
+        const rect = fitRect(boxRect(a.box), style, style.ring.pad)
         const step =
           a.step !== undefined
-            ? clampPoint({ x: rect.x - style.badge.offset + style.badge.diameter * 0.1, y: rect.y - style.badge.offset + style.badge.diameter * 0.1 }, vp, style.badge.diameter * 0.75)
+            ? clampPoint({ x: rect.x + style.badge.offset, y: rect.y + style.badge.offset }, vp, style.badge.diameter * 0.75)
             : null
         plan.rings.set(a.id, { rect, step })
         note(a.id, rect)
@@ -88,13 +109,13 @@ export function planScene(entries: ActiveAnnotation[], vp: Size, style: Annotati
         break
       }
       case 'spotlight': {
-        const rect = inflate(atLeast(boxRect(a.box), style.ring.minSize), style.spotlight.pad)
+        const rect = fitRect(boxRect(a.box), style, style.spotlight.pad)
         plan.spotlights.set(a.id, rect)
         note(a.id, rect)
         break
       }
       case 'tick': {
-        const box = inflate(atLeast(boxRect(a.box), style.ring.minSize), style.ring.pad * 0.6)
+        const box = fitRect(boxRect(a.box), style, style.ring.pad * 0.6)
         const m = style.tick.size * 0.7
         const center = clampPoint({ x: rectRight(box) + style.tick.offset * 0.6, y: box.y - style.tick.offset * 0.6 }, vp, m)
         plan.ticks.set(a.id, { box, center })
@@ -151,7 +172,10 @@ export function planScene(entries: ActiveAnnotation[], vp: Size, style: Annotati
   for (const { annotation: a } of entries) {
     if (a.kind === 'ring' && a.label) {
       const key = labelKey(a.id, 'label')
-      requests.push({ id: key, size: sizeOf(key, a.label, 0.85, b.maxWidth, true), anchor: plan.rings.get(a.id)!.rect, gap: style.ring.pad * 0.5 + 6 })
+      const short = shortLabel(a.label)
+      const fs = b.fontSize * LABEL_SCALE
+      const est: Size = { width: Math.ceil(short.length * fs * 0.55 + fs * 3), height: Math.ceil(fs * 1.3 + fs * 0.7) }
+      requests.push({ id: key, size: sizes[key] ?? est, anchor: plan.rings.get(a.id)!.rect, gap: 4 * style.scale })
     } else if (a.kind === 'bubble') {
       const key = labelKey(a.id, 'bubble')
       const at = normToPx(a.at, vp)

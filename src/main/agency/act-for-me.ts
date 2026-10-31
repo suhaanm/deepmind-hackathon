@@ -119,7 +119,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
 
   const audit = async (entry: Omit<AgencyAuditEntry, 'tool'>): Promise<void> => {
     try {
-      await appendAgencyAudit(ctx.userDataDir, { tool: 'act_for_me', ...entry }, now)
+      await appendAgencyAudit(ctx.userDataDir, { tool: 'act_for_me', ...entry, ...(entry.decision === 'allowed' && sit.lastApproval ? { approval: sit.lastApproval } : {}) }, now)
     } catch (err) {
       ctx.log('agency', 'audit write failed:', err instanceof Error ? err.message : err)
     }
@@ -427,6 +427,7 @@ export function createActForMe(deps: AgencyDeps, sit: Situation, doneForMe: Done
     run,
     stop(): void {
       sit.epoch++
+      sit.autonomyOff() // Stop ends autonomous for the rest of the session
       clearScreen()
     },
     isRunning: () => active !== null,

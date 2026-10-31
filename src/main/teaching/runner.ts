@@ -24,6 +24,7 @@ import type {
   StepDoneResult,
   Verdict,
   CompanionState,
+  DoItForMeResult,
 } from '../../shared/protocol'
 import type { Capture, Grounder, LearnerStore, LessonArchitect, LessonRunner, LevelDecision, LevelEngine, LiveBridge, OverlayController, Verifier } from '../../shared/contracts'
 import type { Settings } from '../../shared/settings'
@@ -52,6 +53,7 @@ import {
 } from './levels'
 import type { AttemptLevelState, AttemptSignal, EvaluateOptions, OverrideKind } from './levels'
 import { fallbackPlan, pointerPlan } from './skills/plans'
+import { riskWords } from '../agency/policy'
 import { SKILLS, pickSkill } from './skills/definitions'
 
 export interface Clock {
@@ -82,6 +84,8 @@ export interface RunnerConfig {
   tickMs: number
   minVerifyConfidence: number
   grabShotForPlanMs: number
+  // After the stall ladder is spent, how long before auto-assist offers to click (lets the last hint be heard).
+  assistDelayMs: number
 }
 
 export const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
@@ -97,6 +101,7 @@ export const DEFAULT_RUNNER_CONFIG: RunnerConfig = {
   tickMs: 1_500,
   minVerifyConfidence: 0.6,
   grabShotForPlanMs: 3_000,
+  assistDelayMs: 1_500,
 }
 
 export interface AttemptSink {
@@ -118,6 +123,9 @@ export interface RunnerDeps {
   state: { get(): CompanionState; patch(partial: Partial<CompanionState>): unknown }
   bus: { emit(event: 'lesson:step', payload: LessonStepEvent): void; emit(event: 'level:changed', payload: LevelChangedEvent): void }
   getSettings(): Settings
+  // Auto-assist on stall (optional, default off): the existing do_it_for_me flow, which owns the real-click confirmation,
+  // the denylist, the scam/safety refusals, the audit and Stop. Absent = the feature does not exist.
+  assist?: (args: { target: string }) => Promise<DoItForMeResult>
   // Persisted profile loaded (first start waits for it).
   ready?: Promise<unknown>
   clock?: Clock
@@ -179,6 +187,8 @@ export class LessonRunnerImpl implements LessonRunner {
   private startSeq = 0
   private idSeq = 0
   private settled: Promise<unknown> = Promise.resolve()
+  // Steps already offered auto-assist (lessonId:index): at most once per step.
+  private readonly assistOffered = new Set<string>()
   private readonly clock: Clock
   private readonly cfg: RunnerConfig
 
@@ -508,6 +518,66 @@ export class LessonRunnerImpl implements LessonRunner {
       this.deps.live.inject(`[STALL] The learner has not acted yet. Narrate the step once more, slowly, in different words: "${oneLine(step.hints.l1)}".`)
     }
     if (this.current(a) && a.rung < MAX_RUNGS[a.stepLevel]) this.armStall(a)
+    else if (this.current(a) && !a.finished && a.index === index && a.stepLevel >= 2 && a.stepLevel <= 3) this.armAssist(a, index)
+  }
+
+  // ---------------------------------------------------------------- auto-assist on stall
+  // Ladder spent and the learner still has not done the step: OFFER to click it via the existing do_it_for_me flow.
+  private armAssist(a: Active, index: number): void {
+    if (!this.deps.assist || this.deps.getSettings().agency === 'off') return
+    const token = a.token
+    // Shares the stall timer slot, so every existing teardown / step change / Stop path cancels it.
+    a.stallTimer = this.clock.setTimeout(() => {
+      if (!this.active || this.active.token !== token || a.index !== index) return
+      void this.offerAssist(a, index) // not tracked by idle(): an open confirmation panel must not block shutdown
+    }, this.cfg.assistDelayMs)
+  }
+
+  private async offerAssist(a: Active, index: number): Promise<void> {
+    const assist = this.deps.assist
+    if (!assist || !this.current(a) || a.finished || a.index !== index) return
+    const step = a.plan.steps[index]
+    const key = `${a.lessonId}:${index}`
+    const state = this.deps.state.get()
+    if (
+      this.deps.getSettings().agency === 'off' ||
+      step.safetyCritical ||
+      a.safetyFlag ||
+      a.skillId === 'spot_scam' ||
+      state.skill?.id === 'spot_scam' ||
+      state.agents.some((ag) => ag.kind === 'scam_check' && ag.status === 'running') ||
+      this.assistOffered.has(key) ||
+      riskWords(step.targetDescription, step.instruction)
+    ) {
+      return
+    }
+    this.assistOffered.add(key)
+    this.deps.live.inject(
+      '[ASSIST] The learner has not managed this step yet. Offer a choice in one warm sentence: "I can click it for you, or you can try once more. Which would you like?" A confirmation panel is on screen; only a real click on it approves. Do not click anything yourself.',
+    )
+    let res: DoItForMeResult
+    try {
+      res = await assist({ target: step.targetDescription })
+    } catch (err) {
+      this.log('auto-assist failed:', err instanceof Error ? err.message : err)
+      return
+    }
+    // Stop / lesson end while the panel was open: say and do nothing more.
+    if (!this.current(a) || a.finished || a.index !== index || res.code === 'stopped') return
+    if (res.done && res.code === 'clicked' && !res.dryRun) {
+      const label = oneLine(res.label ?? step.instruction).slice(0, 40)
+      const learner = this.deps.learner as Partial<LearnerStore>
+      try {
+        await learner.recordDoneForMe?.(`click ${label}`)
+      } catch (err) {
+        this.log('doneForMe count failed:', err instanceof Error ? err.message : err)
+      }
+      this.deps.live.inject(`[ASSIST] You clicked "${label}" for the learner, once. Say in one short sentence what you did, then offer to show them how to do it themselves next time. Do not click again.`)
+    } else if (res.code === 'declined') {
+      this.deps.live.inject('[ASSIST] The learner chose to do it themselves. Encourage them and guide gently; do not click.')
+    } else if (!res.done) {
+      this.deps.live.inject(`[ASSIST] Nothing was clicked (${oneLine(res.reason).slice(0, 120)}). Show the learner where to click instead; they stay in control.`)
+    }
   }
 
   // ---------------------------------------------------------------- signals and levels

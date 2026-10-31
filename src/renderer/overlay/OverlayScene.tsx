@@ -9,7 +9,7 @@ import { CaptionBand, LevelChipEcho, speakerLabel } from './annotations/chrome'
 import { Defs, overlayCss } from './annotations/common'
 import { GhostCursor } from './annotations/GhostCursor'
 import { normToPx, type Size } from './geometry'
-import { CHIP_TOP, chipRect, chooseCaptionRect, labelKey, planScene } from './scene-plan'
+import { CHIP_TOP, LABEL_SCALE, chipRect, chooseCaptionRect, labelKey, planScene, shortLabel } from './scene-plan'
 import type { OverlayState } from './store'
 
 export interface SceneProps {
@@ -39,7 +39,7 @@ export function OverlayScene({ state, viewport, style, captionsEnabled, speakerN
   }, [])
 
   const showCaption = captionsEnabled && state.caption !== null
-  const captionSize = sizes.caption ?? { width: style.caption.maxWidth * 0.6, height: style.caption.fontSize * 3.6 }
+  const captionSize = sizes.caption ?? { width: Math.min(style.caption.maxWidth, viewport.width * 0.6) * 0.7, height: style.caption.fontSize * style.caption.lineHeight + style.caption.padding.y * 2 }
   const chip = useMemo(() => (state.chip ? chipRect(sizes.chip ?? { width: 260 * style.scale, height: style.levelChip.fontSize * 2 }, viewport, CHIP_TOP) : undefined), [state.chip, sizes.chip, viewport, style])
   // Two passes: first the marks (without captions), then the caption goes where it covers none of them.
   const marks = useMemo(() => planScene(state.annotations, viewport, style, sizes, { chip }).marks, [state.annotations, viewport, style, sizes, chip])
@@ -103,7 +103,7 @@ export function OverlayScene({ state, viewport, style, captionsEnabled, speakerN
         if (a.kind === 'ring' && a.label) {
           const key = labelKey(a.id, 'label')
           const placed = plan.labels.get(key)
-          return placed ? <LabelPill key={key} id={key} text={a.label} tone={a.tone} scale={0.85} maxWidth={style.bubble.maxWidth} style={style} placed={placed} exiting={exiting} onSize={onSize} /> : null
+          return placed ? <LabelPill key={key} id={key} compact text={shortLabel(a.label)} tone={a.tone} scale={LABEL_SCALE} maxWidth={style.bubble.maxWidth} style={style} placed={placed} exiting={exiting} onSize={onSize} /> : null
         }
         if (a.kind === 'highlightText' && a.note) {
           const key = labelKey(a.id, 'note')

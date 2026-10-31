@@ -178,6 +178,12 @@ export function SettingsPanel({ settings, onChange, personas, more }: SettingsPa
                 ]}
               />
             </Field>
+            <Switch
+              label="Let it act on its own when I am away"
+              hint="Off by default. Only if you step away mid-lesson and a step is stuck, I may do that one step myself. I never pay, send, delete or log in, and Stop ends it."
+              checked={settings.agency === 'autonomous'}
+              onChange={(on) => onChange({ agency: on ? 'autonomous' : 'ask_each' })}
+            />
           </Group>
 
           <Group title="Menu bar">

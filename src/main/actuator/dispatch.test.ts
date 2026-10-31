@@ -30,7 +30,7 @@ describe('do_it_for_me through the dispatcher', () => {
     expect(await t.dispatch('do_it_for_me', {}, 'live')).toMatchObject({ error: expect.stringContaining('Bad arguments for do_it_for_me') })
     expect(await t.dispatch('do_it_for_me', { target: '' }, 'live')).toHaveProperty('error')
   })
-  it('default setting value is off', () => {
-    expect(DEFAULT_SETTINGS.doItForMeAllowed).toBe(false)
+  it('default setting value is on (ask each time)', () => {
+    expect(DEFAULT_SETTINGS.doItForMeAllowed).toBe(true)
   })
 })

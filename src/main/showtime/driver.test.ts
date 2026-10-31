@@ -153,9 +153,9 @@ describe('showtime driver', () => {
     await h.driver.exec({ type: 'agency.request' })
     h.settings.patch({ captions: !before.captions, textOnly: !before.textOnly })
     await h.driver.exec({ type: 'settings', patch: { glass: true, theme: 'dark' } })
-    expect(h.settings.get().agency).not.toBe(before.agency)
+    // agency now defaults to ask_each, the same level the chapter sets, so only the exact restore below is asserted
     await h.driver.teardown()
-    expect(h.settings.get()).toEqual(before)
+    expect({ ...h.settings.get(), agencyChosen: before.agencyChosen }).toEqual(before)
   })
 
   it('a chapter baseline keeps the persona and agency the tour set, but undoes the look-and-feel flips', async () => {

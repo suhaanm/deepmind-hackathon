@@ -8,6 +8,7 @@ import { createLevelEngine } from './levels'
 import type { TeachingLevelEngine } from './levels'
 import { createTeaching } from './prompts'
 import { LessonRunnerImpl } from './runner'
+import { autoAssistEnabled, getAssist } from '../agency/assist'
 
 export interface TeachingBundle {
   learner: TeachingLearnerStore
@@ -48,6 +49,8 @@ export function teachingBundle(ctx: ServiceContext, s: Services): TeachingBundle
     state: ctx.state,
     bus: ctx.bus,
     getSettings: () => ctx.settings.get(),
+    // Auto-assist on stall: only wired with ALONGSIDE_AUTO_ASSIST=1 (default off); reuses the do_it_for_me flow.
+    ...(autoAssistEnabled() ? { assist: (args: { target: string }) => (getAssist() ? getAssist()!(args) : Promise.reject(new Error('assist unavailable'))) } : {}),
     config: planTimeoutOverride(),
     // Re-read profile.md at each lesson start so edits made outside the app (and the demo seed) are honoured.
     get ready() { return ready.then(() => learner.refresh()) },

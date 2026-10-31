@@ -55,3 +55,19 @@ Real Mac, dry-run actuator, debug-route driven (`docs/reports/MAC_B.md`, 14:50-1
 Dry-run verified only: no approved real action (a real website open, app launch, Finder reveal, click, keystroke or scroll) has been verified on the Mac, because the test shell had no Accessibility and could not press the approval button.
 
 Not verified: a real click or keystroke (Accessibility has never been granted to a test run); the loop end to end in Electron; the real Verifier on a post-action screen. `ask_per_task` relies on the model's `intent` text, Google's `safety_decision` and the denylist for low-risk clicks, so `ask_each` is the recommended mode.
+
+## Auto-assist on stall (off by default)
+
+- Opt-in twice: env `ALONGSIDE_AUTO_ASSIST=1` AND `settings.agency !== 'off'`. Without the env flag the runner has no assist hook at all.
+- When the stall ladder is spent (about 20 s at L2/L3) on a non-safety-critical step, the lesson runner offers once per step: "I can click it for you, or you can try once more. Which would you like?"
+- It reuses the existing `do_it_for_me` flow (`src/main/actuator/flow.ts`, registered via `src/main/agency/assist.ts`): real-click confirmation every time (never skipped, even under `ask_per_task`), denylist, scam/safety refusals, audit, Stop. The runner also pre-skips scam checks, safety steps and denylisted words.
+- An approved click is narrated in one sentence, counted with `recordDoneForMe` (progress view stays honest) and followed by an offer to show how next time. A declined offer leaves the learner in control; nothing is re-offered on that step.
+- Unit tests: `describe('auto-assist on stall')` in `src/main/teaching/__tests__/runner.test.ts`. Real-Mac behaviour is unverified.
+
+## Autonomous mode (opt-in, off by default)
+- `agency: 'autonomous'` lets the assistant carry out an approved action without the "Yes, go ahead" click, but only when ALL hold: the owner switched it on in the dock (Settings > Safety > "Let it act on its own when I am away"; main drops it from every other source, tools, /inject, debug server and the demo driver), the Mac has had no keyboard/mouse input for `awaySeconds` (default 60, via `powerMonitor.getSystemIdleTime()`), and a lesson step has been stalled for 90 s.
+- One decision point: `askToProceed` in `src/main/agency/common.ts`. The same policy and actuator run before and after it; there is no second path.
+- Floor unchanged: denylist, password fields, scam context, safety-critical steps, URL rules, 8-step cap. Extra caps: one auto action per step, 3 per session. The ring/ghost and a spoken line come first, with a 1.5 s lead-in.
+- Visible: the dock shows "Autonomous: on. Acting on its own while you are away: Stop". Each audit line carries `approval: 'auto-away'`.
+- Stop (button or hotkey) cancels at once and switches autonomous off (agency back to ask each time); the owner must turn it on again.
+- Honest limits: real-Mac click accuracy is still being fixed, so keep it off for demos until verified. "Stalled" is a 90 s timer on the step, not a read of the help ladder.

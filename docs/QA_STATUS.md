@@ -8,7 +8,21 @@ How to run: `npm run e2e` (mock, headless, ~25 s) | `npm run e2e -- --mode real 
 
 The debug HTTP server (127.0.0.1:7777: `/shot`, `/state`, `/tool`, `/settings`, no auth) used to start in every unpackaged build. It now starts only when `ALONGSIDE_DEBUG=1` (`src/main/index.ts`). `scripts/electron-lock.sh` and `tests/e2e/run.mjs` export it (so e2e, preflight probe and every agent harness that goes through the lock keep working); `scripts/demo.sh` does not, so a stage launch has no debug surface. Consequence for the demo laptop: `curl 127.0.0.1:7777/shot` only works if you deliberately launch with `ALONGSIDE_DEBUG=1 npm run dev` (noted in `docs/MANUAL_TESTS.md`). `preflight`'s "Alongside already running" row cannot see a normal demo instance any more (it probes `/health`); harmless.
 
-## Final regression (freeze, run 15:23-15:26 GMT; supersedes the table below)
+## FINAL GATE NUMBERS (re-run 15:27 GMT, after AGENCY's fix; these supersede the 15:23 table below)
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | PASS |
+| `npx vitest run` (unit coverage, mock/fake services only) | PASS: 76 files passed, 7 skipped; 1403 tests passed, 27 skipped, 0 failed |
+| `npm run build` | PASS |
+| Secrets scan (`AIza` + 30 chars, whole repo incl. untracked, `.env` excluded) | 0 files |
+| `node scripts/submit-check.mjs` | PASS 11, WARN 3, FAIL 0. WARN: LICENSE missing (accepted by user), repo PRIVATE, showtime `clips/` empty |
+| Preflight network rows (15:25) | All OK (key, models, latency p50 43 ms, Live smoke, wake token). WARN: persona voices TBD for marcus, amelia; demo seed not applied |
+| Preflight macOS rows (Screen Recording, real screen grab, Microphone, hotkeys) | NOT RUN: the Electron lock was held by other testers (ptr, uix, macC) at 15:24, 15:25 and 15:27. Must be run on the demo laptop from the stage terminal. |
+| Mock e2e (practice-desktop test, last run 14:49, before freeze fixes) | 7 files / 61 tests passed, 24 skipped; not re-run after the freeze, not product evidence |
+| Real-macOS pointing/agency by QA | NOT RUN; real clicks are dry-run verified only |
+
+## Earlier run (15:23-15:26 GMT)
 
 Evidence class: unit tests, build and static checks only. Anything run against the stage is a "practice-desktop test", not product evidence. No real-macOS pointing/agency run by QA (the Electron lock was held by MAC-C, PTR, UIX and VIDEO the whole window); real clicks are dry-run verified only.
 

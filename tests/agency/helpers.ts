@@ -42,7 +42,7 @@ export function makeEnv(opts: { agency?: Settings['agency']; accessibility?: boo
   const dir = mkdtempSync(path.join(os.tmpdir(), 'agency-'))
   const bus = new Bus()
   const settings = new SettingsStore(null)
-  settings.patch({ agency: opts.agency ?? 'ask_each' })
+  settings.patch({ agency: opts.agency ?? 'ask_each' }, { trusted: true })
   const state = new StateStore(settings.get())
   settings.onChange((next) => state.patch({ settings: next }))
   const ctx: ServiceContext = { state, bus, settings, userDataDir: dir, sendOverlay: () => undefined, sendDock: () => undefined, log: () => undefined }

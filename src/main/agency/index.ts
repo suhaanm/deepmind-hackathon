@@ -24,7 +24,7 @@ export interface Agency {
 export const agencyLoopFromEnv = (): boolean => process.env.ALONGSIDE_AGENCY_LOOP === '1'
 
 export function createAgency(deps: AgencyDeps & { act?: Partial<ActOptions> }): Agency {
-  const sit = new Situation(deps.ctx)
+  const sit = new Situation(deps.ctx, deps.now)
   const doneForMe: DoneForMeSink = (key) => deps.s.learner.recordDoneForMe?.(key)
   // One limiter for stand-alone opens: >= 1.5 s apart, at most 12 a minute. act_for_me has its own per-task limiter.
   const openLimiter = new ActionLimiter(1_000_000, 1500, 12)

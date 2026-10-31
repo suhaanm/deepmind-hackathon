@@ -113,7 +113,7 @@ export function GhostCursor({ path, style, viewport, pressAtEnd, exiting, freeze
           r={g.press.radius}
           fill="none"
           stroke={color}
-          strokeWidth={i === 0 ? style.stroke.core + 5 : style.stroke.core}
+          strokeWidth={i === 0 ? style.stroke.core + 2 : style.stroke.core}
           opacity={0}
         />
       ))}

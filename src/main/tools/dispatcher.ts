@@ -7,6 +7,7 @@ import type { ServiceContext } from '../context'
 import { createActuator, type Actuator } from '../actuator'
 import { createDoItForMe } from '../actuator/flow'
 import { createAgency, setAgency } from '../agency'
+import { setAssist } from '../agency/assist'
 import { createAxResolver } from '../agency/ax-resolver'
 import { FILE_DATA_NOTICE, wrapSnippet } from '../../shared/files'
 
@@ -19,6 +20,7 @@ type Handlers = { [N in LiveToolName]: (args: ToolArgs<N>) => Promise<ToolResult
 
 export function createDispatcher(ctx: ServiceContext, s: Services, confirm: ConfirmBroker, actuator: Actuator = createActuator({ log: ctx.log })): Dispatch {
   const doItForMe = createDoItForMe({ ctx, s, confirm, actuator })
+  setAssist(doItForMe) // auto-assist on stall (teaching/runner) reuses this exact flow
   const agency = createAgency({ ctx, s, confirm, actuator })
   const resolveAx = createAxResolver({ log: ctx.log })
   setAgency(agency)

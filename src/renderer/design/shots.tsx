@@ -16,7 +16,7 @@ const settings: Settings = {
   ...DEFAULT_SETTINGS,
   persona: 'marcus',
   theme: q.get('theme') === 'dark' ? 'dark' : 'light',
-  glass: q.get('glass') === '1',
+  glass: q.get('glass') !== '0',
   glassOpacity: Number(q.get('opacity') ?? 0.6),
   dyslexiaFont: q.get('dys') === '1',
   highContrast: q.get('hc') === '1',
@@ -33,12 +33,12 @@ const st = (over: Partial<CompanionState>): CompanionState => ({
 })
 const noop = (): void => undefined
 const panel = (tab: 'chat' | 'progress' | 'settings' | 'profile', over: Partial<CompanionState> = {}): ReactElement => (
-  <div className="al-app al-dock al-dock--fill shot-win" style={{ height: 620 }}>
+  <div className="al-app al-dock al-dock--fill shot-win" style={{ height: 580 }}>
     <Panel state={st({ skill: { id: 'bigger_text', name: 'Make the text bigger', step: 2, stepCount: 4 }, ...over })} settings={settings} personaName={name} tab={tab} onTab={noop} onCollapse={noop} onStop={noop} onToggleMute={noop} onWake={noop} onCancelAgent={noop} onSettings={noop} onSetUpAgain={noop} />
   </div>
 )
 const pill = (over: Partial<CompanionState>): ReactElement => (
-  <div className="al-app al-dock al-dock--fill shot-win" style={{ width: 340, height: 68 }}>
+  <div className="al-app al-dock al-dock--fill shot-win" style={{ width: 320, height: 64 }}>
     <Pill state={st(over)} personaName={name} onExpand={noop} onStop={noop} />
   </div>
 )
@@ -47,7 +47,7 @@ const css = document.createElement('style')
 css.textContent = `
   body { margin: 0; background: linear-gradient(150deg, #5d7ba6 0%, #8a5da6 55%, #d6935a 100%); min-height: 100vh; }
   #shots { display: flex; flex-wrap: wrap; gap: 24px; padding: 28px; align-items: flex-start; width: 1700px; }
-  .shot-win { width: 380px; position: relative; }
+  .shot-win { width: 360px; position: relative; }
   .shot-pills { display: flex; flex-direction: column; gap: 14px; width: 100%; flex-basis: 100%; }
   .shot-pills > div { display: flex; gap: 14px; }
 `

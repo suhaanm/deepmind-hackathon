@@ -68,9 +68,9 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.settingsPatch, (patch) => {
     if (typeof patch === 'object' && patch !== null && 'fileFolders' in patch) {
       const { fileFolders: _ignored, ...rest } = patch as Record<string, unknown>
-      return ctx.settings.patch(rest)
+      return ctx.settings.patch(rest, { trusted: true })
     }
-    return ctx.settings.patch(patch)
+    return ctx.settings.patch(patch, { trusted: true })
   })
   handle(IPC.liveToken, async (personaId) => {
     PersonaIdSchema.parse(personaId)

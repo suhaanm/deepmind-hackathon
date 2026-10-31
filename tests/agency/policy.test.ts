@@ -209,11 +209,11 @@ describe('agency setting', () => {
     expect(reconcileAgency({ agency: 'ask_each' }, { doItForMeAllowed: false })).toMatchObject({ agency: 'off' })
     expect(reconcileAgency({ agency: 'ask_each' }, { captions: false })).toEqual({ captions: false })
   })
-  it('defaults to off and reads older files', () => {
-    expect(coerceSettings({}).agency).toBe('off')
-    expect(coerceSettings({}).doItForMeAllowed).toBe(false)
+  it('defaults to ask_each and reads older files', () => {
+    expect(coerceSettings({}).agency).toBe('ask_each')
+    expect(coerceSettings({}).doItForMeAllowed).toBe(true)
     expect(coerceSettings({ doItForMeAllowed: true })).toMatchObject({ agency: 'ask_each', doItForMeAllowed: true })
     expect(coerceSettings({ agency: 'ask_per_task' })).toMatchObject({ agency: 'ask_per_task', doItForMeAllowed: true })
-    expect(coerceSettings({ agency: 'nonsense' })).toMatchObject({ agency: 'off', doItForMeAllowed: false })
+    expect(coerceSettings({ agency: 'nonsense' })).toMatchObject({ agency: 'ask_each', doItForMeAllowed: true })
   })
 })

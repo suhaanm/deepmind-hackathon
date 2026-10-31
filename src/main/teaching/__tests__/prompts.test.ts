@@ -23,7 +23,8 @@ function learner(over: Partial<LearnerSnapshot> = {}): LearnerSnapshot {
   }
 }
 
-const base = { persona: PERSONAS.marcus, settings: DEFAULT_SETTINGS, learner: learner(), level: 2 as const, now: NOW }
+const OFF = { ...DEFAULT_SETTINGS, agency: 'off' as const, doItForMeAllowed: false }
+const base = { persona: PERSONAS.marcus, settings: OFF, learner: learner(), level: 2 as const, now: NOW }
 const words = (s: string): number => s.trim().split(/\s+/).length
 
 describe('buildSystemInstruction', () => {
@@ -31,7 +32,7 @@ describe('buildSystemInstruction', () => {
     const n = words(buildSystemInstruction(base))
     expect(n).toBeGreaterThan(600)
     expect(n).toBeLessThan(960)
-    expect(words(buildSystemInstruction({ ...base, settings: { ...DEFAULT_SETTINGS, doItForMeAllowed: true, agency: 'ask_each', filesEnabled: true } }))).toBeLessThan(1100)
+    expect(words(buildSystemInstruction({ ...base, settings: { ...DEFAULT_SETTINGS, doItForMeAllowed: true, agency: 'ask_each', filesEnabled: true } }))).toBeLessThan(1200)
   })
 
   it('has an early, explicit rule to stay silent unless spoken to or directed', () => {

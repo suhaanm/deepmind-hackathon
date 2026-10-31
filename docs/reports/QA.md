@@ -1,6 +1,8 @@
 # QA report (living; last update 14:50 GMT, final regression pending 15:25-15:40)
 
-## Final regression 15:23-15:26 (full table in docs/QA_STATUS.md)
+## FINAL 15:27: typecheck PASS; vitest 76 files / 1403 passed, 27 skipped, 0 failed; build PASS; secrets scan 0 files; submit-check PASS 11 / WARN 3 / FAIL 0; preflight macOS rows NOT RUN (lock held by other testers); e2e mock numbers are practice-desktop tests only. See docs/QA_STATUS.md.
+
+## Earlier regression 15:23-15:26
 - typecheck PASS; build PASS; vitest 1 failed / 1393 passed / 27 skipped (`tests/agency/act-for-me.test.ts:194`, routed to AGENCY); secrets scan 0 files; submit-check PASS 10 / WARN 3 / FAIL 1 (the vitest row); preflight network rows OK, 4 macOS rows unchecked because other roles held the Electron lock (not real failures).
 - No real-macOS pointing/agency run by QA; mock/stage numbers below are practice-desktop tests only.
 

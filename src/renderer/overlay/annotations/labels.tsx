@@ -16,9 +16,11 @@ interface Common {
   onSize: (id: string, size: Size) => void
 }
 
-export function LabelPill({ id, text, tone, scale, maxWidth, style, placed, exiting, onSize }: Common & { text: string; tone: AnnotationTone; scale: number; maxWidth: number }): ReactElement {
+export function LabelPill({ id, text, tone, scale, maxWidth, style, placed, exiting, onSize, compact = false }: Common & { text: string; tone: AnnotationTone; scale: number; maxWidth: number; compact?: boolean }): ReactElement {
   const b = style.bubble
   const fs = b.fontSize * scale
+  const bw = compact ? Math.max(1, style.scale) : b.borderWidth
+  const pad = compact ? `${fs * 0.3}px ${fs * 0.65}px` : `${b.padding.y * 0.7}px ${b.padding.x * 0.8}px`
   return (
     <div className="ov-html" style={{ left: placed.rect.x, top: placed.rect.y, width: 'max-content', maxWidth }}>
       <Measured
@@ -28,20 +30,21 @@ export function LabelPill({ id, text, tone, scale, maxWidth, style, placed, exit
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: fs * 0.45,
+          gap: fs * (compact ? 0.4 : 0.45),
           background: b.background,
           color: b.color,
-          border: `${b.borderWidth}px solid ${b.borderColor}`,
-          borderRadius: b.radius,
-          padding: `${b.padding.y * 0.7}px ${b.padding.x * 0.8}px`,
-          boxShadow: b.shadow,
+          border: `${bw}px solid ${b.borderColor}`,
+          borderRadius: compact ? fs : b.radius,
+          padding: pad,
+          boxShadow: compact ? '0 2px 8px rgba(5, 7, 13, 0.3)' : b.shadow,
+          whiteSpace: compact ? 'nowrap' : undefined,
           fontFamily: b.fontFamily,
           fontSize: fs,
           lineHeight: b.lineHeight,
           fontWeight: 700,
         }}
       >
-        <GlyphChip tone={tone} style={style} size={Math.round(fs * 1.25)} />
+        <GlyphChip tone={tone} style={style} size={Math.round(fs * (compact ? 1.1 : 1.25))} />
         <span>{text}</span>
       </Measured>
     </div>

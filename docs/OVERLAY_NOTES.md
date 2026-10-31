@@ -86,6 +86,16 @@ Caveats found on the way:
 
 `src/renderer/overlay/harness/real-check.sh` runs the real-window checks (section 7).
 
+## 8c. Compact pass (OVL, 31 Oct 15:30)
+
+Marks are fitted to the grounded box instead of a fixed big ring. Tokens live in `design/annotation-style.ts`; fitting in `scene-plan.ts` (`fitRect`, `shortLabel`).
+- Ring/spotlight/tick: box grown to `ring.minSize` 24 px, capped at `ring.maxSize` 180 px per side (shrunk about the centre), padded 5 px (spotlight 6). Stroke 2.5 px core (casing/halo +1.2/+1), glow blur 10, radius 8.
+- Step badge 18 px, centred on the ring's top-left corner. Arrow head 14 px, gap 6 px, min length 36 px. Tick 24 px.
+- Ring label is a compact chip (about 13 px type, nowrap, 1 px border) with at most 3 words of the label, cut at "in/on/of..." and without "the/button/key/icon"; tried right, below, above, left, avoiding every mark, captions and screen edges (14 px margin). It does not know the Dock window rect: the screen-edge margin is the only protection there.
+- Captions: 16 px, frosted pill (78% ink + backdrop blur; opaque under high contrast), 14x7 px padding, speaker inline, at most 60% of the width, 110-char tail clamped to 2 rows, full width once the line needs a second row so streaming never shifts sideways. Level chip echo also 16 px.
+- Ghost cursor 17 px, no trail, flight 280-750 ms at 1700 px/s, press echo r 18; the "I will not click" tag is 11 px.
+- Animations: enter 180 ms, exit 150 ms, enter scale 1.05 -> 1 (no overshoot); reduced motion 100/80 ms, no pulse. `bigAnnotations` multiplies all of it by 1.6.
+
 ## 8b. "Do it for me" (opt-in actuator)
 
 Off by default (`settings.doItForMeAllowed = false`). Code: `src/main/actuator/**`, one case in `src/main/tools/dispatcher.ts`, the `do_it_for_me{target}` Live tool declaration in `src/renderer/live/tools.ts`. Result shape `{allowed, done, code, reason, label?, verified?, dryRun?}`.

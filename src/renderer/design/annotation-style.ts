@@ -86,6 +86,8 @@ export interface AnnotationStyle {
     radius: number;
     /** Never draw a ring smaller than this (px) so tiny targets stay visible. */
     minSize: number;
+    /** Never draw a ring larger than this (px per side): a ring is a pointer, not a frame. */
+    maxSize: number;
   };
   badge: {
     diameter: number;
@@ -240,9 +242,9 @@ export function annotationStyle(settings: AnnotationStyleSettings, options: Anno
     };
   }
 
-  const core = px(hc ? 5 : 4);
-  const casingExtra = px(hc ? 2.5 : 2);
-  const haloExtra = px(hc ? 2.5 : 1.5);
+  const core = px(hc ? 3.5 : 2.5);
+  const casingExtra = px(hc ? 1.8 : 1.2);
+  const haloExtra = px(hc ? 1.8 : 1);
 
   return {
     scale: s,
@@ -256,48 +258,48 @@ export function annotationStyle(settings: AnnotationStyleSettings, options: Anno
       linecap: 'round',
       linejoin: 'round',
     },
-    glow: { blur: px(hc ? 10 : 16), opacity: hc ? 0.7 : 0.55 },
+    glow: { blur: px(hc ? 8 : 10), opacity: hc ? 0.7 : 0.55 },
     pulse: {
       enabled: !reduced,
       periodMs: 1700,
       scaleFrom: 1,
-      scaleTo: big ? 1.18 : 1.12,
+      scaleTo: big ? 1.1 : 1.07,
       opacityFrom: 0.6,
       opacityTo: 0,
       easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
     },
     transition: {
-      enterMs: reduced ? 120 : 280,
-      exitMs: reduced ? 80 : 220,
+      enterMs: reduced ? 100 : 180,
+      exitMs: reduced ? 80 : 150,
       easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)',
-      enterFromScale: reduced ? 1 : 1.12,
+      enterFromScale: reduced ? 1 : 1.05,
     },
-    ring: { pad: px(10), radius: px(14), minSize: px(44) },
-    badge: { diameter: px(38), fontSize: px(22), fontWeight: 700, fontFamily: font, offset: px(6) },
-    arrow: { headLength: px(24), headWidth: px(24), gap: px(14), curvature: 0.16, minLength: px(56) },
+    ring: { pad: px(5), radius: px(8), minSize: px(24), maxSize: px(180) },
+    badge: { diameter: px(18), fontSize: px(12), fontWeight: 700, fontFamily: font, offset: px(2) },
+    arrow: { headLength: px(14), headWidth: px(14), gap: px(6), curvature: 0.12, minLength: px(36) },
     spotlight: {
-      dimOpacity: hc ? 0.72 : 0.55,
+      dimOpacity: hc ? 0.72 : 0.45,
       dimColor: '#05070D',
-      pad: px(14),
-      radius: px(16),
-      feather: hc ? 0 : px(14),
+      pad: px(6),
+      radius: px(9),
+      feather: hc ? 0 : px(8),
     },
-    tick: { size: px(44), offset: px(10), drawMs: reduced ? 0 : 420, okTone: 'success', notOkTone: 'warn' },
+    tick: { size: px(24), offset: px(4), drawMs: reduced ? 0 : 420, okTone: 'success', notOkTone: 'warn' },
     highlightText: { pad: px(3), underlineWidth: px(4), radius: px(4), tone: 'danger', noteMaxWidth: px(300) },
     caption: {
-      fontSize: px(24),
-      lineHeight: 1.4,
+      fontSize: px(16),
+      lineHeight: 1.3,
       fontFamily: font,
-      padding: { x: px(22), y: px(16) },
-      radius: px(16),
+      padding: { x: px(14), y: px(7) },
+      radius: px(14),
       maxWidth: px(720),
-      background: 'rgba(11, 18, 32, 0.94)',
+      background: hc ? 'rgba(11, 18, 32, 0.94)' : 'rgba(11, 18, 32, 0.78)',
       color: '#FFFFFF',
-      speakerFontSize: px(16),
+      speakerFontSize: px(12),
       speakerColor: '#FFD9A0',
-      border: hc ? `${px(3)}px solid #FFFFFF` : `${px(1.5)}px solid rgba(255, 255, 255, 0.35)`,
-      bottomInset: px(48),
-      maxHeightFraction: 0.22,
+      border: hc ? `${px(3)}px solid #FFFFFF` : `${px(1)}px solid rgba(255, 255, 255, 0.22)`,
+      bottomInset: px(28),
+      maxHeightFraction: 0.12,
     },
     bubble: {
       fontSize: px(22),
@@ -314,26 +316,26 @@ export function annotationStyle(settings: AnnotationStyleSettings, options: Anno
       shadow: '0 6px 22px rgba(5, 7, 13, 0.35)',
     },
     ghostCursor: {
-      size: px(30),
+      size: px(17),
       fill: cores.guide,
       tag: 'Showing you. I will not click.',
-      tagFontSize: px(16),
-      trail: { count: 5, spacingPx: px(14), opacity: 0.45 },
-      press: { radius: px(34), durationMs: reduced ? 0 : 700 },
+      tagFontSize: px(11),
+      trail: { count: 0, spacingPx: px(14), opacity: 0.45 },
+      press: { radius: px(18), durationMs: reduced ? 0 : 700 },
       flight: {
-        minMs: reduced ? 200 : 700,
-        maxMs: reduced ? 400 : 1900,
-        pxPerSec: 620,
-        arcHeightFraction: reduced ? 0 : 0.14,
+        minMs: reduced ? 150 : 280,
+        maxMs: reduced ? 300 : 750,
+        pxPerSec: 1700,
+        arcHeightFraction: reduced ? 0 : 0.07,
         easing: 'cubic-bezier(0.45, 0, 0.25, 1)',
         dwellMs: 600,
       },
     },
     levelChip: {
-      fontSize: px(28),
-      padding: { x: px(22), y: px(12) },
+      fontSize: px(16),
+      padding: { x: px(14), y: px(7) },
       radius: px(999),
-      background: 'rgba(11, 18, 32, 0.94)',
+      background: 'rgba(11, 18, 32, 0.8)',
       color: '#FFFFFF',
       border: `${px(hc ? 3 : 1.5)}px solid ${hc ? '#FFFFFF' : 'rgba(255, 255, 255, 0.4)'}`,
       changeMs: reduced ? 0 : 900,

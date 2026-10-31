@@ -416,7 +416,7 @@ export function evaluateAction(action: ProposedAction, ctx: PolicyContext): Poli
   if (flags.includes('http_not_https') || flags.includes('submit_shaped')) risk = 'medium'
 
   // Tier decision. ask_each confirms everything; ask_per_task lets low-risk, plan-covered actions through.
-  const ask = ctx.agency === 'ask_each' || risk !== 'low' || !ctx.planApproved
+  const ask = ctx.agency === 'ask_each' || ctx.agency === 'autonomous' || risk !== 'low' || !ctx.planApproved
   return { allowed: true, ask, risk, reason: ask ? 'ask the learner first' : 'covered by the confirmed plan', flags }
 }
 

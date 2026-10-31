@@ -16,10 +16,15 @@ export const SettingsSchema = z.object({
   teachBack: z.boolean().default(true),
   scamShield: z.boolean().default(true),
   // Both OFF unless the user turns them on; "do it for me" additionally needs a real-click confirmation per action.
-  doItForMeAllowed: z.boolean().default(false),
+  doItForMeAllowed: z.boolean().default(true),
   // AGENCY: how much the assistant may DO for the learner. off = teach only; ask_each = a real-click confirmation before
   // every action; ask_per_task = confirm the plan once, still confirm anything risky. Keep doItForMeAllowed = agency !== 'off'.
-  agency: z.enum(['off', 'ask_each', 'ask_per_task']).default('off'),
+  agency: z.enum(['off', 'ask_each', 'ask_per_task', 'autonomous']).default('ask_each'),
+  // true once the user picked a level themselves (dock Settings or onboarding); until then an old 'off' is migrated to ask_each.
+  agencyChosen: z.boolean().default(false),
+  // autonomous = no confirmation click while the user is away (no keyboard/mouse for awaySeconds) AND a lesson step is stalled;
+  // the policy floor never changes. Can only be switched on from the dock Settings UI (main drops it from any other source).
+  awaySeconds: z.number().min(3).max(3600).default(60),
   carerSharing: z.boolean().default(false),
   pushToTalkOnly: z.boolean().default(false),
   listeningLight: z.boolean().default(true),

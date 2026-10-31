@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { DEFAULT_PERSONA, PERSONAS } from '../../shared/personas'
 import { ConfirmModal, applyDesignSettings } from '../design'
 import { chatBus } from './chat/bus'
@@ -39,19 +39,22 @@ export function App(): ReactElement | null {
     void window.alongside.setDockMode(open ? 'expanded' : 'compact')
   }, [open])
 
-  // Text-only setting and the chat's Talk | Type switch are one idea; keep them in step both ways.
+  // Talk is the default at every launch: a saved textOnly (from an older Type switch or the tray) is cleared once on load.
+  // The chat's Talk | Type switch is for this chat only and never writes the setting; the Settings switch follows it while it is on.
   const textOnly = settings?.textOnly
+  const launched = useRef(false)
   useEffect(() => {
-    if (textOnly !== undefined) chatBus.setMode(textOnly ? 'text' : 'voice')
-  }, [textOnly])
-  useEffect(
-    () =>
-      chatBus.onMode((mode, info) => {
-        if (info?.transient) return // menu-bar "Type instead": this chat only, never a saved preference
-        if (settings && settings.textOnly !== (mode === 'text')) patchSettings({ textOnly: mode === 'text' })
-      }),
-    [settings?.textOnly, patchSettings], // eslint-disable-line react-hooks/exhaustive-deps
-  )
+    if (textOnly === undefined) return
+    if (!launched.current) {
+      launched.current = true
+      if (textOnly) {
+        chatBus.setMode('voice', { transient: true })
+        patchSettings({ textOnly: false })
+        return
+      }
+    }
+    chatBus.setMode(textOnly ? 'text' : 'voice', { transient: true })
+  }, [textOnly]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -111,6 +114,12 @@ export function App(): ReactElement | null {
   return (
     <div className="al-app al-dock al-dock--fill" data-phase={state.phase} data-mode={open ? 'expanded' : 'compact'}>
       <ShowtimeBar />
+      {settings.agency === 'autonomous' ? (
+        <div className="al-autonomous" role="status" style={{ fontSize: 12, opacity: 0.85, padding: '2px 10px', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span>Autonomous: on. Acting on its own while you are away:</span>
+          <button type="button" className="al-btn" onClick={() => window.alongside.pressStop()}>Stop</button>
+        </div>
+      ) : null}
       {onboarding ? (
         <OnboardingFlow settings={settings} onPatch={patchSettings} onDone={() => setExpanded(false)} />
       ) : open ? (

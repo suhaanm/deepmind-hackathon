@@ -9,7 +9,7 @@ import { Measured } from './common'
 import type { CaptionState, ChipState } from '../store'
 
 // Long streaming lines keep the most recent words visible.
-export function tailText(text: string, max = 240): string {
+export function tailText(text: string, max = 110): string {
   if (text.length <= max) return text
   const cut = text.slice(text.length - max)
   const space = cut.indexOf(' ')
@@ -34,6 +34,11 @@ export function CaptionBand({
 }): ReactElement {
   const c = style.caption
   const exiting = caption.exitingAt !== null
+  const text = tailText(caption.text)
+  // At most ~60% of the screen. Once the line needs more than one row the band takes its full width, so streaming
+  // words never make it jump sideways; the text is clamped to two rows.
+  const maxW = Math.min(c.maxWidth, viewport.width * 0.6)
+  const wide = text.length > 56 * (c.fontSize > 20 ? 0.6 : 1)
   return (
     <div className="ov-html" style={{ left: 0, width: '100%', ...(topY === null ? { bottom: c.bottomInset } : { top: topY }), display: 'flex', justifyContent: 'center' }}>
       <Measured
@@ -41,8 +46,10 @@ export function CaptionBand({
         onSize={onSize}
         className={exiting ? 'ov-exit' : 'ov-fade-enter'}
         style={{
-          width: 'max-content',
-          maxWidth: Math.min(c.maxWidth, viewport.width - 48),
+          width: wide ? maxW : 'max-content',
+          maxWidth: maxW,
+          backdropFilter: style.highContrast ? undefined : 'blur(14px) saturate(1.4)',
+          WebkitBackdropFilter: style.highContrast ? undefined : 'blur(14px) saturate(1.4)',
           maxHeight: viewport.height * c.maxHeightFraction,
           overflow: 'hidden',
           background: c.background,
@@ -54,13 +61,13 @@ export function CaptionBand({
           fontSize: c.fontSize,
           lineHeight: c.lineHeight,
           fontWeight: 600,
-          boxShadow: '0 8px 28px rgba(5, 7, 13, 0.4)',
+          boxShadow: '0 4px 16px rgba(5, 7, 13, 0.28)',
         }}
       >
-        {speakerName ? (
-          <div style={{ fontSize: c.speakerFontSize, color: c.speakerColor, fontWeight: 700, marginBottom: 4, letterSpacing: 0.2 }}>{speakerName}</div>
-        ) : null}
-        <div>{tailText(caption.text)}</div>
+        <div style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          {speakerName ? <span style={{ fontSize: c.speakerFontSize, color: c.speakerColor, fontWeight: 700, marginRight: 8, letterSpacing: 0.2 }}>{speakerName}</span> : null}
+          <span>{text}</span>
+        </div>
       </Measured>
     </div>
   )
@@ -136,7 +143,7 @@ export function LevelChipEcho({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: l.fontSize * 0.6,
+          gap: l.fontSize * 0.5,
           background: l.background,
           color: l.color,
           border: l.border,
@@ -145,7 +152,7 @@ export function LevelChipEcho({
           fontFamily: style.bubble.fontFamily,
           fontSize: l.fontSize,
           fontWeight: 700,
-          boxShadow: '0 6px 22px rgba(5, 7, 13, 0.4)',
+          boxShadow: '0 4px 14px rgba(5, 7, 13, 0.3)',
         }}
       >
         <span aria-hidden style={{ display: 'inline-flex', alignItems: 'flex-end', gap: l.fontSize * 0.15, height: l.fontSize }}>

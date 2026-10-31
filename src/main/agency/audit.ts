@@ -17,6 +17,8 @@ export interface AgencyAuditEntry {
   host?: string
   step?: number
   dryRun?: boolean
+  // Set only when no confirmation click was needed because the owner had opted in and was away.
+  approval?: 'auto-away'
 }
 
 const SENSITIVE = /\b(password|passcode|token|api[_ -]?key|secret|private[_ -]?key|seed phrase|recovery phrase)\b|\bsk-[a-z0-9_-]{6,}|\bxox[baprs]-[a-z0-9-]+|\b(?:\d[ -]?){13,19}\b/i
@@ -42,6 +44,7 @@ export function auditLine(entry: AgencyAuditEntry, now: () => number = Date.now)
     ...(entry.host ? { host: entry.host.slice(0, 120) } : {}),
     ...(entry.step !== undefined ? { step: entry.step } : {}),
     ...(entry.dryRun ? { dryRun: true } : {}),
+    ...(entry.approval ? { approval: entry.approval } : {}),
   })
 }
 

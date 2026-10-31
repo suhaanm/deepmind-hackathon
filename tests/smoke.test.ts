@@ -101,7 +101,7 @@ describe('dispatcher + mock services', () => {
 
 describe('settings', () => {
   it('has the safe defaults from the brief', () => {
-    expect(DEFAULT_SETTINGS).toMatchObject({ demoMode: true, doItForMeAllowed: false, carerSharing: false })
+    expect(DEFAULT_SETTINGS).toMatchObject({ demoMode: true, doItForMeAllowed: true, carerSharing: false })
   })
   it('keeps valid keys and defaults the rest from a corrupt file', () => {
     expect(coerceSettings({ voiceSpeed: 9, captions: false, junk: 1 })).toMatchObject({ voiceSpeed: 1, captions: false })

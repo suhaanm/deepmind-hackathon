@@ -3,6 +3,7 @@ import type { Capture, LessonArchitect, Verifier } from '../../../shared/contrac
 import type {
   Annotation,
   CompanionState,
+  DoItForMeResult,
   GroundResult,
   HelpLevel,
   LessonPlan,
@@ -17,7 +18,7 @@ import type { Settings } from '../../../shared/settings'
 import { TeachingLearnerStore } from '../learner-store'
 import { levelEngine } from '../levels'
 import { LessonRunnerImpl } from '../runner'
-import type { Clock, RunnerConfig } from '../runner'
+import type { Clock, RunnerConfig, RunnerDeps } from '../runner'
 import { pickSkill } from '../skills/definitions'
 import { fallbackPlan } from '../skills/plans'
 
@@ -87,7 +88,7 @@ interface Rig {
   sawShown(id: string): boolean
 }
 
-function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; stateLevel?: HelpLevel; config?: Partial<RunnerConfig> } = {}): Rig {
+function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; stateLevel?: HelpLevel; config?: Partial<RunnerConfig>; assist?: RunnerDeps['assist'] } = {}): Rig {
   const clock = new FakeClock()
   const settings: Settings = { ...DEFAULT_SETTINGS, ...opts.settings }
   const injects: string[] = []
@@ -169,6 +170,7 @@ function makeRig(opts: { settings?: Partial<Settings>; prefetch?: boolean; state
     getSettings: () => settings,
     clock,
     config: opts.config,
+    ...(opts.assist ? { assist: opts.assist } : {}),
   })
   const rig: Rig = {
     clock, runner, store, injects, shown, cleared, levelEvents, stepEvents, state, watch: watch as never, verdicts, verifyCalls: 0, groundCalls, prefetchCalls, prefetchPrecise, grabs,
@@ -1230,5 +1232,133 @@ describe('in-lesson adaptive fading (the hero moment)', () => {
     expect(rig.state.cur.level).toBe(3)
     await actAndVerify(rig)
     expect(fades(rig)).toHaveLength(1)
+  })
+})
+
+describe('auto-assist on stall', () => {
+  const NOVEL = 'help me use my strange gizmo' // goes to the architect, whose plan the test controls
+  const LADDER_MS = 8_000 + 6_000 + 6_000 // L3: three rungs
+  const res = (code: DoItForMeResult['code'], extra: Partial<DoItForMeResult> = {}): DoItForMeResult => ({
+    allowed: true, done: code === 'clicked', code, reason: code === 'clicked' ? 'I clicked it once.' : `not clicked: ${code}`, label: 'Start call', ...extra,
+  })
+  const setup = async (settings: Partial<Settings>, impl: (t: string) => Promise<DoItForMeResult>) => {
+    const calls: string[] = []
+    const rig = makeRig({ settings, assist: async ({ target }) => (calls.push(target), impl(target)) })
+    await rig.store.setSkillLevel('video_call', 3)
+    await startLesson(rig)
+    return { rig, calls }
+  }
+  const assistInjects = (rig: Rig): string[] => rig.injects.filter((t) => t.startsWith('[ASSIST]'))
+
+  it('offers a choice after the ladder is spent, and counts a approved click as done-for-me', async () => {
+    const { rig, calls } = await setup({ agency: 'ask_each' }, async () => res('clicked'))
+    await rig.clock.advance(LADDER_MS - 1)
+    expect(calls).toHaveLength(0)
+    await rig.clock.advance(1_500 + 1)
+    await rig.settle()
+    expect(calls).toHaveLength(1)
+    expect(assistInjects(rig)[0]).toContain('I can click it for you, or you can try once more. Which would you like?')
+    expect(assistInjects(rig)[1]).toContain('offer to show them how')
+    expect(rig.store.snapshot().doneForMe).toEqual({ 'click Start call': 1 })
+  })
+
+  it('offers at most once per step', async () => {
+    const { rig, calls } = await setup({ agency: 'ask_each' }, async () => res('declined'))
+    await rig.clock.advance(LADDER_MS + 2_000)
+    await rig.settle()
+    await rig.clock.advance(120_000)
+    await rig.runner.onStall()
+    await rig.clock.advance(120_000)
+    await rig.settle()
+    expect(calls).toHaveLength(1)
+  })
+
+  it('a declined offer leaves the learner in control and counts nothing', async () => {
+    const { rig } = await setup({ agency: 'ask_per_task' }, async () => res('declined'))
+    await rig.clock.advance(LADDER_MS + 2_000)
+    await rig.settle()
+    expect(assistInjects(rig).at(-1)).toContain('chose to do it themselves')
+    expect(rig.store.snapshot().doneForMe ?? {}).toEqual({})
+    expect(rig.runner.running).toBe(true)
+  })
+
+  it('never when agency is off', async () => {
+    const { rig, calls } = await setup({ agency: 'off' }, async () => res('clicked'))
+    await rig.clock.advance(LADDER_MS + 10_000)
+    await rig.settle()
+    expect(calls).toHaveLength(0)
+    expect(assistInjects(rig)).toHaveLength(0)
+  })
+
+  it('never for a safety-critical step', async () => {
+    const calls: string[] = []
+    const rig = makeRig({ settings: { agency: 'ask_each' }, assist: async ({ target }) => (calls.push(target), res('clicked')) })
+    rig.architect.impl = async (req) => {
+      const plan = fallbackPlan('video_call', req.goal)
+      return { ...plan, steps: plan.steps.map((st) => ({ ...st, safetyCritical: true })) }
+    }
+    await rig.store.setSkillLevel('video_call', 3)
+    await startLesson(rig, NOVEL)
+    await rig.clock.advance(LADDER_MS + 10_000)
+    await rig.settle()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('never during a scam check', async () => {
+    const calls: string[] = []
+    const rig = makeRig({ settings: { agency: 'ask_each' }, assist: async ({ target }) => (calls.push(target), res('clicked')) })
+    await rig.store.setSkillLevel('video_call', 3)
+    await startLesson(rig)
+    rig.state.patch({ agents: [{ id: 'a1', kind: 'scam_check', status: 'running', title: 'scam check' } as never] })
+    await rig.clock.advance(LADDER_MS + 10_000)
+    await rig.settle()
+    expect(calls).toHaveLength(0)
+    const rig2 = makeRig({ settings: { agency: 'ask_each' }, assist: async ({ target }) => (calls.push(target), res('clicked')) })
+    await startLesson(rig2, 'Is this message a scam?')
+    await rig2.clock.advance(60_000)
+    await rig2.settle()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('never offers for a denylisted label', async () => {
+    const calls: string[] = []
+    const rig = makeRig({ settings: { agency: 'ask_each' }, assist: async ({ target }) => (calls.push(target), res('clicked')) })
+    rig.architect.impl = async (req) => {
+      const plan = fallbackPlan('video_call', req.goal)
+      return { ...plan, steps: plan.steps.map((st) => ({ ...st, targetDescription: 'green button labelled Pay now' })) }
+    }
+    await rig.store.setSkillLevel('video_call', 3)
+    await startLesson(rig, NOVEL)
+    await rig.clock.advance(LADDER_MS + 10_000)
+    await rig.settle()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('a refusal from the do_it_for_me flow clicks nothing and is not counted', async () => {
+    const { rig } = await setup({ agency: 'ask_each' }, async () => res('sensitive', { allowed: false }))
+    await rig.clock.advance(LADDER_MS + 2_000)
+    await rig.settle()
+    expect(assistInjects(rig).at(-1)).toContain('Nothing was clicked')
+    expect(rig.store.snapshot().doneForMe ?? {}).toEqual({})
+  })
+
+  it('Stop (lesson aborted) before the offer cancels it; Stop while the panel is open says nothing more', async () => {
+    const a = await setup({ agency: 'ask_each' }, async () => res('clicked'))
+    await a.rig.clock.advance(LADDER_MS - 1_000)
+    await a.rig.runner.abort('stop')
+    await a.rig.clock.advance(60_000)
+    await a.rig.settle()
+    expect(a.calls).toHaveLength(0)
+
+    let release: (r: DoItForMeResult) => void = () => undefined
+    const b = await setup({ agency: 'ask_each' }, () => new Promise<DoItForMeResult>((r) => (release = r)))
+    await b.rig.clock.advance(LADDER_MS + 2_000)
+    await b.rig.settle()
+    expect(b.calls).toHaveLength(1)
+    await b.rig.runner.abort('stop')
+    release(res('stopped'))
+    await b.rig.settle()
+    expect(assistInjects(b.rig)).toHaveLength(1) // only the offer, no narration
+    expect(b.rig.store.snapshot().doneForMe ?? {}).toEqual({})
   })
 })

@@ -53,7 +53,7 @@ export function createOpenForMe(deps: AgencyDeps, sit: Situation, limiter: Actio
 
   const audit = async (a: ProposedAction, decision: 'allowed' | 'blocked' | 'declined' | 'stopped' | 'refused', ok: boolean, code: string, dryRun?: boolean): Promise<void> => {
     try {
-      await appendAgencyAudit(ctx.userDataDir, { tool: 'open_for_me', decision, ok, code, label: auditLabel(a), host: auditHost(a), dryRun }, now)
+      await appendAgencyAudit(ctx.userDataDir, { tool: 'open_for_me', decision, ok, code, label: auditLabel(a), host: auditHost(a), dryRun, ...(decision === 'allowed' && sit.lastApproval ? { approval: sit.lastApproval } : {}) }, now)
     } catch (err) {
       ctx.log('agency', 'audit write failed:', err instanceof Error ? err.message : err)
     }

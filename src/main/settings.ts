@@ -20,7 +20,9 @@ export class SettingsStore {
   private load(): Settings {
     if (!this.file) return { ...DEFAULT_SETTINGS }
     try {
-      return coerceSettings(JSON.parse(fs.readFileSync(this.file, 'utf8')))
+      const loaded = coerceSettings(JSON.parse(fs.readFileSync(this.file, 'utf8')))
+      // Profiles saved before the assistant could act carry agency 'off' they never chose: switch them to ask-each-time.
+      return !loaded.agencyChosen && loaded.agency === 'off' ? { ...loaded, agency: 'ask_each', doItForMeAllowed: true } : loaded
     } catch {
       return { ...DEFAULT_SETTINGS }
     }
@@ -31,7 +33,13 @@ export class SettingsStore {
   }
 
   // Invalid values are dropped key by key; the rest of the patch still applies.
-  patch(raw: unknown): Settings {
+  // `trusted` is true ONLY for the dock Settings UI (IPC settings:patch from the renderer). Autonomous agency and its away
+  // threshold are dropped from every other source (model tools, /inject, lesson prompts, the debug server, the demo driver).
+  patch(raw: unknown, opts: { trusted?: boolean } = {}): Settings {
+    if (!opts.trusted && typeof raw === 'object' && raw !== null) {
+      const { awaySeconds: _a, ...rest } = raw as Record<string, unknown>
+      raw = rest.agency === 'autonomous' ? (({ agency: _g, ...r }) => r)(rest) : rest
+    }
     const accepted: Record<string, unknown> = {}
     if (typeof raw === 'object' && raw !== null) {
       for (const key of Object.keys(SettingsSchema.shape) as (keyof Settings)[]) {
@@ -41,6 +49,7 @@ export class SettingsStore {
       }
     }
     if (Object.keys(accepted).length === 0) return this.current
+    if (opts.trusted && 'agency' in accepted) accepted.agencyChosen = true
     const patch = reconcileAgency(this.current, accepted as SettingsPatch)
     this.current = { ...this.current, ...patch }
     this.scheduleSave()
