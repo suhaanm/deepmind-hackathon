@@ -1,0 +1,51 @@
+[
+ {
+  "id": "S1_1",
+  "speaker": "USER",
+  "text": "Hey Marcus, help me apply for a job at Google DeepMind.",
+  "start": 3.5,
+  "end": 10.755
+ },
+ {
+  "id": "S2_1",
+  "speaker": "ASST",
+  "text": "Of course. I'll open the careers page for you.",
+  "start": 11.2,
+  "end": 16.235
+ },
+ {
+  "id": "S3_1",
+  "speaker": "ASST",
+  "text": "Now I'll look for roles that match you.",
+  "start": 16.7,
+  "end": 19.947
+ },
+ {
+  "id": "S4_1",
+  "speaker": "ASST",
+  "text": "This last step is yours. I never submit applications for you. Go ahead and press Apply.",
+  "start": 20.4,
+  "end": 29.982
+ },
+ {
+  "id": "S5_1",
+  "speaker": "USER",
+  "text": "Marcus, is this email okay?",
+  "start": 31.4,
+  "end": 35.007
+ },
+ {
+  "id": "S5_2",
+  "speaker": "ASST",
+  "text": "I'd be careful. It asks you to pay a fee, and rushes you. Real recruiters never do that. Please don't click the link.",
+  "start": 35.4,
+  "end": 47.73
+ },
+ {
+  "id": "S6_1",
+  "speaker": "ASST",
+  "text": "Next time, I'll only nudge. That's the point.",
+  "start": 48.4,
+  "end": 53.315
+ }
+]

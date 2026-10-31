@@ -15,7 +15,7 @@ const run = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: 'utf8', m
 const git = (args, opts) => run('git', args, opts)
 
 // Big files that are allowed to be tracked (keep in sync with docs/SUBMISSION_CHECK.md).
-const BIG_FILE_ALLOWLIST = [/^package-lock\.json$/, /^assets\/showtime\/clips\//]
+const BIG_FILE_ALLOWLIST = [/^package-lock\.json$/, /^assets\/showtime\/clips\//, /^media\/.*\.(mp4|png)$/]
 
 const tracked = git(['ls-files', '-z']).stdout.split('\0').filter(Boolean)
 

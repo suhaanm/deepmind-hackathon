@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Alongside overlay kit</title>
+<meta name="viewport" content="width=1920">
+<link rel="stylesheet" href="kit.css">
+<style>
+ html,body{width:1920px;height:1080px;overflow:hidden}
+ body{background:linear-gradient(135deg,#d3dff0 0%,#ece3d2 55%,#dfe9df 100%)}
+ :root[data-theme="dark"] body{background:linear-gradient(135deg,#1c2433,#2a2018 60%,#1b2a24)}
+ body.clean{background:transparent}
+ body.clean .showcase{display:none}
+ .sc{position:absolute;font:700 13px/1 var(--font-ui);letter-spacing:.06em;text-transform:uppercase;color:#4a453f;opacity:.85}
+ :root[data-theme="dark"] .sc{color:#cfc6b8}
+ .page{position:absolute;left:60px;top:130px;width:820px;height:560px;background:#fff;border-radius:14px;box-shadow:0 10px 40px rgba(28,25,23,.18);padding:28px;font:400 18px var(--font-ui);color:#1c1917}
+ .page h2{margin:0 0 16px;font:700 28px var(--font-ui)}
+ .page .row{display:flex;gap:16px;align-items:center;border:1px solid #e6e1d6;border-radius:12px;padding:14px 18px;margin:0 0 12px}
+ .page .row b{flex:1}
+ .page .apply{background:#1a73e8;color:#fff;border-radius:8px;padding:12px 28px;font-weight:700}
+ .page .fake{background:#fde8e6;border:1px dashed #d14;padding:6px 8px;display:inline-block;border-radius:4px}
+</style></head>
+<body>
+<div class="showcase">
+ <div class="sc" style="left:60px;top:100px">Ring + label chip + number badge + arrow (target: Apply)</div>
+ <div class="page"><h2>Research Engineer</h2>
+  <div class="row"><b>Research Engineer, Gemini</b><span id="apply" class="apply" style="margin-left:auto">Apply</span></div>
+  <div class="row"><b>Research Scientist, Safety</b><span class="apply" style="background:#6b7280">Apply</span></div>
+  <div class="row"><b>Software Engineer, Infrastructure</b><span class="apply" style="background:#6b7280">Apply</span></div>
+  <p>Please wire a <span id="flag" class="fake">processing fee of $149</span> to continue.</p>
+ </div>
+ <div class="sc" style="left:60px;top:716px">Pill 320x64 (live / working / muted)</div>
+ <div class="sc" style="left:960px;top:100px">Progress panel</div>
+ <div class="sc" style="left:960px;top:700px">Cursors: ghost + pulse | user arrow + ripple</div>
+ <div class="sc" style="left:1440px;top:530px;">Toast (real spot: top-right, y 44)</div>
+ <div class="sc" style="left:1130px;top:34px">Menu-bar item states</div><div class="sc" style="left:0;top:0;display:none"></div>
+ <div class="sc" style="left:700px;top:960px">Caption pill (bottom) / level chip (top)</div>
+</div>
+<div id="stage"></div>
+<script src="kit.js"></script>
+<script>
+ const q=new URLSearchParams(location.search);
+ if(q.has('clean'))document.body.classList.add('clean');
+ if(q.get('theme'))kit.setTheme(q.get('theme'));
+ if(!q.has('clean')){
+  const a=document.getElementById('apply').getBoundingClientRect();
+  kit.ring({x:a.x,y:a.y,w:a.width,h:a.height},'Press Apply',{step:1});
+  const f=document.getElementById('flag').getBoundingClientRect();
+  kit.ring({x:f.x,y:f.y,w:f.width,h:f.height},'Asks for money',{tone:'danger',step:2});
+  kit.arrow(520,570,f.x+f.width/2-30,f.y+f.height+4,{tone:'warn'});
+  kit.pill('live',{x:60,y:760}); kit.pill('working',{x:60,y:840,word:'Working…'}); kit.pill('muted',{x:60,y:920});
+  kit.progressPanel({task:'Apply to Google DeepMind',step:3,total:3,level:3,doneForYou:3,byYou:1},{x:960,y:130});
+  ['Listening','Live','Working…','Muted'].forEach((t,i)=>kit.menuBarState(t,{x:1130+i*180,y:6}));
+  kit.toast({title:'Alongside needs your OK',body:'I will open the careers page for you. OK?',primary:'Yes, open it',secondary:'No, I will'},{x:1440,y:560});
+  kit.ghostCursor(1000,780,'Marcus'); kit.pulseBot(1000,780,{keep:true});
+  kit.userCursor(1260,780); kit.rippleUser(1260,780,{keep:true});
+  kit.labelChip('Look here',1160,840);
+  kit.caption('This last step is yours. I never submit applications for you.',{who:'Marcus',y:996});
+  kit.levelChip(3,2,3,{y:40,x:700});
+ }
+</script>
+</body></html>
