@@ -1,13 +1,13 @@
-# Alongside launch: storyboard (62 s, 1920x1080, 30 fps)
-| t (s) | Scene | Voice | On screen |
+# Alongside v4 (teaching) storyboard, 63.0 s, 1920x1080, 30 fps
+Times are video seconds, driven by audio4/cues.json (final master.wav). Engine: v4/work/engine.html (GSAP-free, deterministic R(t)), rendered by v4/work/render.mjs (6 headless Chromes), built by v4/work/build.sh.
+
+| Scene | t (s) | On screen | Voice (cues.json) |
 |---|---|---|---|
-| 0-3.5 | S0 kinetic title | (music) | "Every assistant wants to be needed." / "This one wants to be fired." teal underline |
-| 3.5-10.8 | S1 ask | USER: "Hey Marcus, help me apply for a job at Google DeepMind." | big caption word by word, cream waveform pill |
-| 10.7-13.5 | S2 permission | ASST: "Of course. I'll open the careers page for you." | top-right toast "Alongside needs your OK", user arrow clicks "Yes, open it" (white ripple) |
-| 13.5-19 | S2/S3 | ASST: "Now I'll look for roles that match you." | real careers page rises in, HUD chip (Apply to Google DeepMind, Step 1 of 3, Watch me, Done for you 1); blue ghost cursor clicks View open roles (2.0x zoom, blue ring pulse) |
-| 19-27 | S3 | ASST (S4 line starts 20.4) | search box ring, typing "research engineer", Done for you 3 |
-| 27-31 | S4 hand-over | "...press Apply." | user arrow opens a role, ghost points at Apply: "Showing you. I will not click.", Walk with me, user click -> By you 1 |
-| 31.3-47.7 | S5 email | USER "Marcus, is this email okay?" ASST warns | whip transition to the staged mail; red rings "Asks for money", "Rushing you", "Fake address", "Odd link"; chip "Check an email" |
-| 48.4-55.6 | S6 progress | ASST: "Next time, I'll only nudge. That's the point." | HUD morphs into the progress panel: 3 steps, Done for you 3 / By you 1, Watch me -> Walk with me -> Nudge me |
-| 55.6-62 | S7 close | (music resolves) | "Alongside" / "It tries to get fired." |
-Teaser (16.4 s): 0-3.2, 17.2-21.7, 28.8-32.0, 41.5-45.0, 55.6-57.6.
+| T0 kinetic | 0-3.3 | "It doesn't just help. It builds digital literacy." then "It teaches you. Then it steps back." | music pad only |
+| T1 | 3.4-7 | User line as kinetic words + waveform pill; real System Settings windows fade in at 7.9 | USER 3.4: "Hey Marcus, I'd like to make the text bigger." |
+| T2 Level 1 | 9.2-19 | Chip "Help level 1 of 4 - Watch me | Step 1/2/3 of 3". Camera eases to 1.9x on each target. BLUE ghost cursor, label "Showing you. I will not click.", glides: sidebar Accessibility (12.2), Display row (14.4), then the second window's Text size row (16.6). No click, no ring | ASST 9.4 "Let me show you first. Watch where I go. I won't click anything." |
+| T3 Level 2 | 19.1-30 | Chip -> "Help level 2 of 4 - Walk with me | Step 1 of 3". Tight ring + number badge on each target. User macOS arrow clicks (white ripple): Accessibility 21.9, WRONG click on Appearance 23.6 (Appearance pane shows, red ring, hint pill "Not quite. Display is just below."), Display 26.8, Text size 28.6; green tick after each step | ASST 19.4 "Now you try. I'll point, you click." / 24.0 "Not quite. Display is just below." / 28.5 "That's it. Well done." |
+| T4 Level 3 | 30.0-40.8 | Chip -> "Help level 3 of 4 - Nudge me | Step 1 of 3". No ring. Cursor drifts (stall), soft warm glow around the target at 31.2, spoken clue 31.6; side card "Hints this time: 1". User then finds Accessibility 35.9, Display 37.8, Text size 39.6 on her own, ticks | ASST 31.6 "Take your time. Look near the top left." |
+| T5 teach-back | 40.8-51.9 | Camera 1.9x on Text size row; composed slider card (knob animates up while the user answers); green tick after the answer; then a 1-5 confidence dial animates 1 -> 4 (49.0-51.6) | ASST 41.2 "In your own words, what does that slider do?" / USER 44.9 "It makes everything bigger." / ASST 47.6 "Exactly right. How sure do you feel, from one to five?" |
+| T6 Progress | 51.9-60 | Glass card "Digital literacy: things you can do now": 'Make text bigger' ticked, "Hints per try" bars 5 -> 3 -> 1, memory line "Last time you found Display on your own" | ASST 52.2 "Next time, I'll only step in if you ask. That's the point." / 58.0 caption "Digital literacy, built one small skill at a time." |
+| T7 end | 60.55-63 | Product placeholder + "It tries to get fired." (over the T7_1 caption, no overlap) | ASST 58.0-62.35 "Digital literacy, built one small skill at a time." |

@@ -1,51 +1,79 @@
 [
  {
-  "id": "S1_1",
+  "id": "T1_1",
   "speaker": "USER",
-  "text": "Hey Marcus, help me apply for a job at Google DeepMind.",
-  "start": 3.5,
-  "end": 10.755
+  "text": "Hey Marcus, I'd like to make the text bigger.",
+  "start": 3.4,
+  "end": 6.96
  },
  {
-  "id": "S2_1",
-  "speaker": "ASST",
-  "text": "Of course. I'll open the careers page for you.",
-  "start": 11.2,
-  "end": 16.235
+  "id": "T2_1",
+  "speaker": "ASSISTANT",
+  "text": "Let me show you first. Watch where I go. I won't click anything.",
+  "start": 9.4,
+  "end": 13.31
  },
  {
-  "id": "S3_1",
-  "speaker": "ASST",
-  "text": "Now I'll look for roles that match you.",
-  "start": 16.7,
-  "end": 19.947
+  "id": "T3_1",
+  "speaker": "ASSISTANT",
+  "text": "Now you try. I'll point, you click.",
+  "start": 19.4,
+  "end": 22.38
  },
  {
-  "id": "S4_1",
-  "speaker": "ASST",
-  "text": "This last step is yours. I never submit applications for you. Go ahead and press Apply.",
-  "start": 20.4,
-  "end": 29.982
+  "id": "T3_2",
+  "speaker": "ASSISTANT",
+  "text": "Not quite. Display is just below.",
+  "start": 24.0,
+  "end": 28.08
  },
  {
-  "id": "S5_1",
+  "id": "T3_3",
+  "speaker": "ASSISTANT",
+  "text": "That's it. Well done.",
+  "start": 28.5,
+  "end": 30.81
+ },
+ {
+  "id": "T4_1",
+  "speaker": "ASSISTANT",
+  "text": "Take your time. Look near the top left.",
+  "start": 31.6,
+  "end": 34.94
+ },
+ {
+  "id": "T5_1",
+  "speaker": "ASSISTANT",
+  "text": "In your own words, what does that slider do?",
+  "start": 41.2,
+  "end": 44.59
+ },
+ {
+  "id": "T5_2",
   "speaker": "USER",
-  "text": "Marcus, is this email okay?",
-  "start": 31.4,
-  "end": 35.007
+  "text": "It makes everything bigger.",
+  "start": 44.9,
+  "end": 47.28
  },
  {
-  "id": "S5_2",
-  "speaker": "ASST",
-  "text": "I'd be careful. It asks you to pay a fee, and rushes you. Real recruiters never do that. Please don't click the link.",
-  "start": 35.4,
-  "end": 47.73
+  "id": "T5_3",
+  "speaker": "ASSISTANT",
+  "text": "Exactly right. How sure do you feel, from one to five?",
+  "start": 47.6,
+  "end": 51.77
  },
  {
-  "id": "S6_1",
-  "speaker": "ASST",
-  "text": "Next time, I'll only nudge. That's the point.",
-  "start": 48.4,
-  "end": 53.315
+  "id": "T6_1",
+  "speaker": "ASSISTANT",
+  "text": "Next time, I'll only step in if you ask. That's the point.",
+  "start": 52.2,
+  "end": 56.61
+ },
+ {
+  "id": "T7_1",
+  "speaker": "ASSISTANT",
+  "text": "Digital literacy, built one small skill at a time.",
+  "start": 58.0,
+  "end": 62.35
  }
 ]

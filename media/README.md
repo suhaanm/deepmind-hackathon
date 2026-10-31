@@ -1,54 +1,37 @@
-# Alongside launch video (v3): how it was made and how to rebuild
+# Alongside launch v4 (teaching focus): how it was made
 
-Files: alongside-launch.mp4 (1920x1080, 30 fps, 62 s, H.264 + AAC, faststart), alongside-launch-teaser-15s.mp4 (16.4 s), poster.png, storyboard.md, audio/ (stems + master_final.wav), v3/ (engine, frames), footage3/ (raw clips), audio3/, kit/. The older alongside-demo-v2.mp4 is superseded.
+> In this repo the final video is `alongside-launch.mp4` (the file the build calls alongside-teaching.mp4). It replaces the earlier 'apply for a job' cut, which stays in git history (commit d772757). Raw footage, audio stems and the render engine stay local.
+
+Files: alongside-teaching.mp4 (1920x1080, 30 fps, 63.0 s, H.264 + AAC 192k 48 kHz, faststart), poster.png (t = 31 s), storyboard.md, work/ (engine.html, render.mjs, mkD.py, build.sh, D.json, contact1/2.jpg = contact sheets every 1.5 s, spectrogram.png, final_audio.wav). Audio and footage come from ../audio4/ and ../footage4/.
 
 ## REAL vs COMPOSED
 | Element | Status |
 |---|---|
-| Google DeepMind careers page, "View open roles", job list, search box typing "research engineer", role page with Apply (footage3/*.mp4, role-apply.png) | REAL public web pages, recorded by the FOOTAGE lane with scripted clicks (not the assistant's own run) |
-| Mail client and the "Talent Team" fee email | STAGED local page (mock mail client, fake sender address). It does not read anyone's real mail |
-| Blue ghost cursor, ring, label chips, caption pill, level chip, toast ("Alongside needs your OK", "Yes, open it" / "No, I will"), menu-bar state, progress panel, red-flag rings | COMPOSED in v3/work/engine.html to match the product look (media/kit, src/renderer/overlay); not captured from Electron. The real Electron dock was not launched |
-| User cursor (macOS arrow + white ripple) vs assistant cursor (blue ghost + blue ring pulse) | COMPOSED |
-| Voices (user + "Marcus"), sfx, music bed, master mix | Gemini TTS + synthesised sfx/bed by the AUDIO lane (audio3/) |
-| Kinetic type, camera zooms, whip transitions, waveform (synthetic amplitude gated by the voice cue times), counters, end card | COMPOSED motion design |
+| System Settings windows (Accessibility pane, Display pane with Text size row, Appearance pane), highlight rects | REAL macOS System Settings captures (footage4/s1,s3,s4); rects from the accessibility tree (AX), not estimated. Apple Account/Family sidebar rows were painted over by the footage lane; no name, network or email visible (checked at full size) |
+| Voices (USER, Marcus) | Gemini TTS (audio4/), cleaned of end bursts; music = pure C-major sine pad. No sound effects |
+| Blue ghost cursor + label "Showing you. I will not click.", level chip text "Help level N of 4 - ...", "Step N of 3", ring + badge, repair hint pill, caption pill | COMPOSED in engine.html to match the product look (kit/, real strings). Not captured from Electron. No Electron was launched |
+| User cursor (macOS arrow + white ripple) | COMPOSED. The user's clicks are scripted on the static captures: nothing was actually clicked. The assistant never clicks anything on screen |
+| Screen changes after each click (crossfade between captures) | COMPOSED; s1 and s2 were identical (Settings has no separate home pane) so Accessibility and Display are shown as steps on the one real pane; the Appearance capture is used for the wrong click |
+| Text size slider card in T5 | COMPOSED stand-in: the real Text size row opens a sub-pane that was not captured (s5 close-up only shows the row), so a small light slider card with an animated knob and "Everything looks bigger" is drawn under the real row |
+| Confidence dial, Hints card ("Hints this time: 1"), Progress card, kinetic type, end card, camera zooms | COMPOSED motion design |
+| Hints-per-try bars 5 -> 3 -> 1, "Last time you found Display on your own", ticked 'Make text bigger' | DEMO DATA (illustrative, not measured from any real user). Not stated as such on screen |
+| Hints-this-time = 1 in T4 | scripted to match the single spoken clue |
 
-Everything is scripted and deterministic. The video shows the user (not the assistant) opening a role and pressing Apply; the assistant only points ("Showing you. I will not click.", the product's real ghost label) and never applies, signs in or submits. Nothing is called "safe". No "Concept" content.
-
-Assumption: "the separate email thing" = the Scam Shield email check, shown on a staged recruiter-style email.
-
-HUD truthfulness: the glass chip at right is driven by marks in v3/work/render.mjs (`marks`): Step 1 of 3 / Watch me until 17.9 s, Step 2 from the View open roles click, Step 3 / Walk with me from 26 s; Done for you 1 (page opened, 14.6 s) -> 2 (roles list, 18.2 s) -> 3 (search typed, 23.3 s); By you 1 at the Apply click (31.0 s). During the email it switches to "Check an email, Step 1 of 1". The closing panel shows Watch me -> Walk with me -> Nudge me with 3 / 1.
+Teaching, not doing: "Done for you" is never shown; the assistant is never shown clicking. Persona "Marcus" is a placeholder. No statistics or exclusion figures are claimed.
 
 ## Rebuild
 ```bash
-cd /Users/suhaan/Desktop/hackathon/media/v3/work
-# frames from the real clips (30 fps)
-mkdir -p fr/car fr/b fr/em fr/r && cp ../../footage3/role-apply.png fr/r/role.png
-ffmpeg -y -i ../../footage3/careers.mp4 -vf fps=30 -q:v 3 fr/car/%05d.jpg
-ffmpeg -y -i ../../footage3/careers-search.mp4 -vf fps=30 -q:v 3 fr/b/%05d.jpg
-ffmpeg -y -i ../../footage3/email.mp4 -vf fps=30 -q:v 3 fr/em/%05d.jpg
-# render 1860 frames with 6 parallel headless Chromes (engine.html, deterministic R(t))
-for i in 0 1 2 3 4 5; do a=$((i*310)); node render.mjs $((9380+i)) $a $((a+310)) & done; wait
-# audio (loudnorm -16 LUFS, TP -1.5) and encode
-cd ../.. && ffmpeg -y -i audio3/master.wav -af "loudnorm=I=-16:TP=-1.5:LRA=11" -ar 48000 audio/master_final.wav
-ffmpeg -y -framerate 30 -i v3/frames/%05d.jpg -i audio/master_final.wav -c:v libx264 -preset medium -crf 17 -pix_fmt yuv420p -c:a aac -b:a 192k -shortest -movflags +faststart alongside-launch.mp4
-python3 v3/work/teaser.py
+cd /Users/suhaan/Desktop/hackathon/media/v4/work && ./build.sh   # reads audio4/cues.json + master.wav, footage4/*.png + rects.json
 ```
-Voices, tick sounds and bed are rebuilt by the AUDIO lane's scripts in audio3/ (key read from the repo .env by script, never printed).
+Everything is timed from cues.json (see storyboard.md).
 
-## Loudness (measured on the final mp4, ebur128)
-Integrated -16.4 LUFS, LRA 3.0 LU, true peak -1.7 dBFS. Sound design (quiet sine ticks: user and assistant at different pitch, warm toast chime, soft whooshes, pad bed) is from audio3/.
-
-## Checked by viewing frames
-Contact sheets every 1.5 s and spot frames: no private content (public pages, staged mail only, no menu bar/dock/usernames), HUD text matches the step, cursors distinct, no overlapping caption/chip after fixes (flag chips for the fee and deadline sit below their boxes).
+## Checks performed
+- Contact sheets every 1.5 s viewed (work/contact1.jpg, contact2.jpg); spot frames at 25 s and 62.4 s.
+- ffprobe: H.264 + AAC, both 63.000 s; cues.json durations vs master.wav: speech onset in the muxed audio is within 0.01-0.05 s of each cue start; no energy bursts in the 80 ms after each cue end.
+- Integrated loudness of the mp4: about -15.8 LUFS. Spectrogram (work/spectrogram.png): speech bands only, no wide vertical bars at sentence ends.
 
 ## Not verified
-- Nobody has listened to the audio: voice quality, sfx taste and bed level are unheard; sync is by timestamps only (ticks at 17.9/20.4/22.9/31.0 s vs the visual clicks, cues in audio3/cues.json).
-- Narration timing vs visuals: the line "This last step is yours..." starts at 20.4 s while the search typing is on screen; the Apply moment is at 29-31 s.
-- No 60 fps motion-blur blend (blur is CSS only on whips/zooms). The real Electron dock was not recorded.
-
-## Published subset and audio update (16:30)
-This folder holds the final videos plus the storyboard, spec and design kit. Raw footage, stems, frames and the build engine (v3/, footage3/, audio/, audio3/, work/) stay local to keep the repo small. Final audio: voices + one very quiet constant music pad only. All sound effects (whooshes, toast chime, ticks) were removed because they were audible as screeches at line ends; the mix script is audio3/remix_clean.py (local).
-
-Audio update (16:40): the music pad was replaced by a pure, un-detuned C-major pad (no beating) that fades out by 56 s; the voices end at 53.3 s, so the last ~6 s are silent.
-
-Audio fix (16:50, root cause): every Gemini TTS sentence segment ended with a ~120 ms loud low-frequency burst; the segments were concatenated, so a burst sat at the end of every sentence. All 16 bursts were cut from the voice files (silence, no speech removed) and the mix rebuilt from the cleaned stems.
+- Nobody listened to the audio (voice quality, music level, any tiny click). A single-sample spike (jump 0.41) exists at about 32.0 s inside "Take your time" and shows as a hairline in the spectrogram: possibly a TTS artifact; audio lane to confirm.
+- T4 stall: cues put the clue at 31.6 s, so the on-screen stall before the glow is about 1.2 s (silence from 30.0 s), not 3 s.
+- "Display is just below" is the spec line; on the real Appearance sidebar Display is not literally the next row.
+- No 60 fps blend; the real Electron dock was not recorded.
