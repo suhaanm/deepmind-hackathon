@@ -251,4 +251,6 @@ Honest list:
 
 ## Team
 
-`TEAM NAMES TBD — confirm with team`
+Suhaan Mobhani
+Shriyans Gadnis
+Tristan Hatton
